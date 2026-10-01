@@ -42,7 +42,7 @@ logs/
 *~
 
 # Fichiers de données
-data/
+inputs/
 
 # Jupyter Notebook
 .ipynb_checkpoints
