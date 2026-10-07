@@ -1,0 +1,19 @@
+[
+    {
+        "question": "Quelle équipe a remporté le championnat NBA en 2024 ?",
+        "reference": "Les Boston Celtics ont remporté le championnat NBA en 2024."
+    },
+    {
+        "question": "Qui a remporté le championnat NBA en 2023 ?",
+        "reference": "Les Denver Nuggets ont remporté le championnat NBA en 2023."
+    },                                                                            
+    {
+        "question": "Qui a été le MVP de la saison NBA 2023-2024 ?",
+        "reference": "Le MVP de la saison NBA 2023-2024 était Nikola Jokic."
+    },
+    {
+        "question": "Quel joueur a été le meilleur marqueur de la saison NBA 2023-2024 ?",
+        "reference": "Le meilleur marqueur de la saison NBA 2023-2024 était Joel Embiid."
+    }
+
+]

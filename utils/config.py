@@ -7,6 +7,7 @@ load_dotenv()
 
 # --- Clé API ---
 MISTRAL_API_KEY = os.getenv("MISTRAL_API_KEY")
+DASHSCOPE_API_KEY = os.getenv("DASHSCOPE_API_KEY")
 if not MISTRAL_API_KEY:
     print("⚠️ Attention: La clé API Mistral (MISTRAL_API_KEY) n'est pas définie dans le fichier .env")
     # Vous pouvez choisir de lever une exception ici ou de continuer avec des fonctionnalités limitées
@@ -14,7 +15,7 @@ if not MISTRAL_API_KEY:
 
 # --- Modèles Mistral ---
 EMBEDDING_MODEL = "mistral-embed"
-MODEL_NAME = "mistral-small-latest" # Ou un autre modèle comme mistral-large-latest
+MODEL_NAME = "qwen3.8-flash" # Ou un autre modèle comme mistral-large-latest
 
 # --- Configuration de l'Indexation ---
 # INPUT_DATA_URL = os.getenv("INPUT_DATA_URL") # Décommentez si vous utilisez une URL

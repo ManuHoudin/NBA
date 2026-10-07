@@ -1,16 +1,16 @@
 # MistralChat.py (version RAG)
 import streamlit as st
-import os
 import logging
-from mistralai.client import MistralClient
-from mistralai.models.chat_completion import ChatMessage
+
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
 from dotenv import load_dotenv
 
 # --- Importations depuis vos modules ---
 try:
     from utils.config import (
         MISTRAL_API_KEY, MODEL_NAME, SEARCH_K,
-        APP_TITLE, NAME
+        APP_TITLE, NAME, DASHSCOPE_API_KEY
     )
     from utils.vector_store import VectorStoreManager
 except ImportError as e:
@@ -23,19 +23,26 @@ except ImportError as e:
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s - %(message)s')
 
 # --- Configuration de l'API Mistral ---
-api_key = MISTRAL_API_KEY
+api_key = DASHSCOPE_API_KEY
 model = MODEL_NAME
 
 if not api_key:
-    st.error("Erreur : Clé API Mistral non trouvée (MISTRAL_API_KEY). Veuillez la définir dans le fichier .env.")
+    st.error("Erreur : Clé API Qwen non trouvée (DASHSCOPE_API_KEY). Veuillez la définir dans le fichier .env.")
     st.stop()
 
 try:
-    client = MistralClient(api_key=api_key)
-    logging.info("Client Mistral initialisé.")
+    #client = MistralClient(api_key=api_key)
+    client = ChatOpenAI(
+        model=model,
+        api_key=api_key,
+        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        temperature=0.2,
+        extra_body={"enable_thinking": False}
+    )
+    logging.info("Client Qwen3.8-flash initialisé.")
 except Exception as e:
-    st.error(f"Erreur lors de l'initialisation du client Mistral : {e}")
-    logging.exception("Erreur initialisation client Mistral")
+    st.error(f"Erreur lors de l'initialisation du client Qwen : {e}")
+    logging.exception("Erreur initialisation client Qwen")
     st.stop()
 
 # --- Chargement du Vector Store (mis en cache) ---
@@ -86,33 +93,25 @@ if "messages" not in st.session_state:
 
 # --- Fonctions ---
 
-def generer_reponse(prompt_messages: list[ChatMessage]) -> str:
+def generer_reponse(messages: list) -> str:
     """
-    Envoie le prompt (qui inclut maintenant le contexte) à l'API Mistral.
+    Envoie le prompt (qui inclut maintenant le contexte) à l'API Qwen.
     """
-    if not prompt_messages:
+    if not messages:
          logging.warning("Tentative de génération de réponse avec un prompt vide.")
          return "Je ne peux pas traiter une demande vide."
     try:
-        logging.info(f"Appel à l'API Mistral modèle '{model}' avec {len(prompt_messages)} message(s).")
+        logging.info(f"Appel à l'API Qwen modèle '{model}' avec {len(messages)} message(s).")
         # Log le contenu du prompt (peut être long) - commenter si trop verbeux
         # logging.debug(f"Prompt envoyé à l'API: {prompt_messages}")
 
-        response = client.chat(
-            model=model,
-            messages=prompt_messages,
-            temperature=0.1, # Température basse pour des réponses factuelles basées sur le contexte
-            # top_p=0.9,
-        )
-        if response.choices and len(response.choices) > 0:
-            logging.info("Réponse reçue de l'API Mistral.")
-            return response.choices[0].message.content
-        else:
-            logging.warning("L'API n'a pas retourné de choix valide.")
-            return "Désolé, je n'ai pas pu générer de réponse valide pour le moment."
+        response = client.invoke(messages)
+
+        return response.content
+    
     except Exception as e:
-        st.error(f"Erreur lors de l'appel à l'API Mistral: {e}")
-        logging.exception("Erreur API Mistral pendant client.chat")
+        st.error(f"Erreur lors de l'appel à l'API Qwen: {e}")
+        logging.exception("Erreur API Qwen pendant client.chat")
         return "Je suis désolé, une erreur technique m'empêche de répondre. Veuillez réessayer plus tard."
 
 # --- Interface Utilisateur Streamlit ---
@@ -160,14 +159,21 @@ if prompt := st.chat_input(f"Posez votre question sur la {NAME}..."):
         context_str = "Aucune information pertinente trouvée dans la base de connaissances pour cette question."
         logging.warning(f"Aucun contexte trouvé pour la query: {prompt}")
 
-    # 5. Construire le prompt final pour l'API Mistral en utilisant le System Prompt RAG
+    # 5. Construire le prompt final pour l'API Qwen en utilisant le System Prompt RAG
     final_prompt_for_llm = SYSTEM_PROMPT.format(context_str=context_str, question=prompt)
 
     # Créer la liste de messages pour l'API (juste le prompt système/utilisateur combiné)
     messages_for_api = [
-        # On pourrait séparer system et user, mais Mistral gère bien un long message user structuré
-        ChatMessage(role="user", content=final_prompt_for_llm)
-    ]
+    SystemMessage(content=SYSTEM_PROMPT),
+    HumanMessage(
+        content=(
+            f"CONTEXTE DE LA BASE DE CONNAISSANCES\n\n"
+            f"{context_str}\n\n"
+            f"QUESTION DU FAN\n\n"
+            f"{prompt}"
+        )
+    )
+]
 
     # === Fin de la logique RAG ===
 
