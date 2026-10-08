@@ -15,5 +15,9 @@
         "question": "Quel joueur a été le meilleur marqueur de la saison NBA 2023-2024 ?",
         "reference": "Le meilleur marqueur de la saison NBA 2023-2024 était Joel Embiid."
     }
+    {
+        "question": "Quel joueur a le meilleur % à 3 points sur les 5 derniers matchs ?",
+        "reference": "Le joueur ayant le meilleur pourcentage à 3 points sur les 5 derniers matchs est Zach LaVine."
+    }
 
 ]

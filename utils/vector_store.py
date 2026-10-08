@@ -4,10 +4,11 @@ import pickle
 import faiss
 import numpy as np
 import logging
-from typing import List, Dict, Tuple, Optional
-from mistralai.client import MistralClient
-from mistralai.exceptions import MistralAPIException
-from langchain.text_splitter import RecursiveCharacterTextSplitter
+from typing import List, Dict, Tuple, Optional, Any
+
+from mistralai.client import Mistral, errors
+
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 from langchain_core.documents import Document # Utilisé pour le format attendu par le splitter
 
 from .config import (
@@ -22,8 +23,8 @@ class VectorStoreManager:
 
     def __init__(self):
         self.index: Optional[faiss.Index] = None
-        self.document_chunks: List[Dict[str, any]] = []
-        self.mistral_client = MistralClient(api_key=MISTRAL_API_KEY)
+        self.document_chunks: List[Dict[str, Any]] = []
+        self.mistral_client = Mistral(api_key=MISTRAL_API_KEY)
         self._load_index_and_chunks()
 
     def _load_index_and_chunks(self):
@@ -43,7 +44,7 @@ class VectorStoreManager:
         else:
             logging.warning("Fichiers d'index Faiss ou de chunks non trouvés. L'index est vide.")
 
-    def _split_documents_to_chunks(self, documents: List[Dict[str, any]]) -> List[Dict[str, any]]:
+    def _split_documents_to_chunks(self, documents: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
         """Découpe les documents en chunks avec métadonnées."""
         logging.info(f"Découpage de {len(documents)} documents en chunks (taille={CHUNK_SIZE}, chevauchement={CHUNK_OVERLAP})...")
         text_splitter = RecursiveCharacterTextSplitter(
@@ -78,7 +79,7 @@ class VectorStoreManager:
         logging.info(f"Total de {len(all_chunks)} chunks créés.")
         return all_chunks
 
-    def _generate_embeddings(self, chunks: List[Dict[str, any]]) -> Optional[np.ndarray]:
+    def _generate_embeddings(self, chunks: List[Dict[str, Any]]) -> Optional[np.ndarray]:
         """Génère les embeddings pour une liste de chunks via l'API Mistral."""
         if not MISTRAL_API_KEY:
             logging.error("Impossible de générer les embeddings: MISTRAL_API_KEY manquante.")
@@ -98,15 +99,15 @@ class VectorStoreManager:
 
             logging.info(f"  Traitement du lot {batch_num}/{total_batches} ({len(texts_to_embed)} chunks)")
             try:
-                response = self.mistral_client.embeddings(
+                response = self.mistral_client.embeddings.create(
                     model=EMBEDDING_MODEL,
-                    input=texts_to_embed
+                    inputs=texts_to_embed,
                 )
                 batch_embeddings = [data.embedding for data in response.data]
                 all_embeddings.extend(batch_embeddings)
-            except MistralAPIException as e:
-                logging.error(f"Erreur API Mistral lors de la génération d'embeddings (lot {batch_num}): {e}")
-                logging.error(f"  Détails: Status Code={e.status_code}, Message={e.message}")
+            except errors.MistralError as se:
+                logging.error(f"Erreur API Mistral lors de la génération d'embeddings (lot {batch_num}): {se}")
+                logging.error(f"  Détails: Status Code={se.status_code}, Message={se.message}")
             except Exception as e:
                 logging.error(f"Erreur inattendue lors de la génération d'embeddings (lot {batch_num}): {e}")
                  # Gérer l'erreur: ici on ajoute des vecteurs nuls pour ne pas bloquer
@@ -114,18 +115,6 @@ class VectorStoreManager:
                 if all_embeddings: # Si on a déjà des embeddings, on prend la dimension du premier
                     dim = len(all_embeddings[0])
                 else: # Sinon, on ne peut pas déterminer la dimension, on saute ce lot
-                     logging.error("Impossible de déterminer la dimension des embeddings, saut du lot.")
-                     continue
-                logging.warning(f"Ajout de {num_failed} vecteurs nuls de dimension {dim} pour le lot échoué.")
-                all_embeddings.extend([np.zeros(dim, dtype='float32')] * num_failed)
-
-            except Exception as e:
-                logging.error(f"Erreur inattendue lors de la génération d'embeddings (lot {batch_num}): {e}")
-                # Gérer comme ci-dessus
-                num_failed = len(texts_to_embed)
-                if all_embeddings:
-                    dim = len(all_embeddings[0])
-                else:
                      logging.error("Impossible de déterminer la dimension des embeddings, saut du lot.")
                      continue
                 logging.warning(f"Ajout de {num_failed} vecteurs nuls de dimension {dim} pour le lot échoué.")
@@ -140,7 +129,7 @@ class VectorStoreManager:
         logging.info(f"Embeddings générés avec succès. Shape: {embeddings_array.shape}")
         return embeddings_array
 
-    def build_index(self, documents: List[Dict[str, any]]):
+    def build_index(self, documents: List[Dict[str, Any]]):
         """Construit l'index Faiss à partir des documents."""
         if not documents:
             logging.warning("Aucun document fourni pour construire l'index.")
@@ -174,7 +163,7 @@ class VectorStoreManager:
 
         # Créer un index pour la similarité cosinus (IndexFlatIP = produit scalaire)
         self.index = faiss.IndexFlatIP(dimension)
-        self.index.add(embeddings)
+        self.index.add(x=embeddings)
         logging.info(f"Index Faiss créé avec {self.index.ntotal} vecteurs.")
 
         # 4. Sauvegarder l'index et les chunks
@@ -199,7 +188,7 @@ class VectorStoreManager:
         except Exception as e:
             logging.error(f"Erreur lors de la sauvegarde de l'index/chunks: {e}")
 
-    def search(self, query_text: str, k: int = 5, min_score: float = None) -> List[Dict[str, any]]:
+    def search(self, query_text: str, k: int = 5, min_score: float = None) -> List[Dict[str, Any]]: # type: ignore
         """
         Recherche les k chunks les plus pertinents pour une requête.
 
@@ -221,9 +210,9 @@ class VectorStoreManager:
         logging.info(f"Recherche des {k} chunks les plus pertinents pour: '{query_text}'")
         try:
             # 1. Générer l'embedding de la requête
-            response = self.mistral_client.embeddings(
+            response = self.mistral_client.embeddings.create(
                 model=EMBEDDING_MODEL,
-                input=[query_text] # La requête doit être une liste
+                inputs=[query_text],
             )
             query_embedding = np.array([response.data[0].embedding]).astype('float32')
 
@@ -235,7 +224,7 @@ class VectorStoreManager:
             # indices: index des chunks correspondants dans self.document_chunks
             # Demander plus de résultats si un score minimum est spécifié
             search_k = k * 3 if min_score is not None else k
-            scores, indices = self.index.search(query_embedding, search_k)
+            scores, indices = self.index.search(x=query_embedding, k=search_k)
 
             # 3. Formater les résultats
             results = []
@@ -280,9 +269,9 @@ class VectorStoreManager:
 
             return results
 
-        except MistralAPIException as e:
-            logging.error(f"Erreur API Mistral lors de la génération de l'embedding de la requête: {e}")
-            logging.error(f"  Détails: Status Code={e.status_code}, Message={e.message}")
+        except errors.MistralError as se:
+            logging.error(f"Erreur API Mistral lors de la génération de l'embedding de la requête: {se}")
+            logging.error(f"  Détails: Status Code={se.status_code}, Message={se.message}")
             return []
         except Exception as e:
             logging.error(f"Erreur inattendue lors de la recherche: {e}")

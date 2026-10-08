@@ -4,7 +4,7 @@ import requests
 import zipfile
 import io
 from pathlib import Path
-from typing import List, Dict, Optional, Union
+from typing import List, Dict, Optional, Union, Any
 import logging
 import numpy as np
 from tqdm import tqdm # Ajout de tqdm
@@ -208,7 +208,7 @@ def download_and_extract_zip(url: str, output_dir: str) -> bool:
         logging.error(f"Erreur inattendue lors du téléchargement/extraction: {e}")
         return False
 
-def load_and_parse_files(input_dir: str) -> List[Dict[str, any]]:
+def load_and_parse_files(input_dir: str) -> List[Dict[str, Any]]:
     """
     Charge et parse récursivement les fichiers d'un répertoire.
     Retourne une liste de dictionnaires, chacun représentant un document.

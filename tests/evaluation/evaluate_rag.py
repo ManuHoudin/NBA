@@ -1,123 +1,77 @@
+import asyncio
 import json
 import logging
 
 from dotenv import load_dotenv
 
-from langchain_core.messages import SystemMessage, HumanMessage
-from openai import AsyncOpenAI
-from ragas.llms import llm_factory
-
-from datasets import Dataset
-
-from ragas import evaluate
-from ragas.metrics.collections import (
-    ContextPrecision,
-    ContextRecall,
-    Faithfulness,
-    AnswerRelevancy,
+from langchain_core.messages import (
+    SystemMessage,
+    HumanMessage,
 )
-from mistralai.client import MistralClient
-from openai import AsyncOpenAI
+from langchain_openai import ChatOpenAI
 
+from mistralai.client import Mistral
 
-from utils.config import DASHSCOPE_API_KEY, MODEL_NAME, SEARCH_K, MISTRAL_API_KEY
+from tests.evaluation.RAGasEvaluator import RAGasEvaluator
+
+from utils.config import (
+    DASHSCOPE_API_KEY,
+    MISTRAL_API_KEY,
+    SEARCH_K,
+)
+
 from utils.vector_store import VectorStoreManager
 
 
+# ============================================================
+# Configuration
+# ============================================================
 
 load_dotenv()
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s - %(levelname)s - %(message)s"
+    format="%(asctime)s - %(levelname)s - %(message)s",
 )
 
 
-# ---------------------------------------------------------
-# Configuration Qwen
-# ---------------------------------------------------------
+# ============================================================
+# LLM Qwen
+# ============================================================
 
-ragas_client = AsyncOpenAI(
+llm = ChatOpenAI(
+    model="qwen3.8-flash",
     api_key=DASHSCOPE_API_KEY,
-    base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-)
-
-ragas_llm = llm_factory(
-    model=MODEL_NAME,
-    client=ragas_client,
+    base_url=(
+        "https://dashscope-intl.aliyuncs.com/"
+        "compatible-mode/v1"
+    ),
     temperature=0.2,
     extra_body={
         "enable_thinking": False
-    }
+    },
 )
 
-# ---------------------------------------------------------
-# Formatage embeddings Mistral pour Ragas
-# ---------------------------------------------------------
-from ragas.embeddings.base import BaseRagasEmbeddings
-from mistralai.client import MistralClient
 
+# ============================================================
+# Mistral
+# ============================================================
 
-class MistralRagasEmbeddings(BaseRagasEmbeddings):
-
-    def __init__(self, mistral_client):
-        self.mistral_client = mistral_client
-
-    def embed_query(self, text: str) -> list[float]:
-        response = self.mistral_client.embeddings(
-            model="mistral-embed",
-            input=[text],
-        )
-
-        if not response.data:
-            raise RuntimeError("Mistral n'a retourné aucun embedding")
-
-        return response.data[0].embedding
-
-    def embed_documents(self, texts: list[str]) -> list[list[float]]:
-        response = self.mistral_client.embeddings(
-            model="mistral-embed",
-            input=texts,
-        )
-
-        if not response.data:
-            raise RuntimeError("Mistral n'a retourné aucun embedding")
-
-        return [item.embedding for item in response.data]
-
-    async def aembed_query(self, text: str) -> list[float]:
-        return self.embed_query(text)
-
-    async def aembed_documents(
-        self,
-        texts: list[str],
-    ) -> list[list[float]]:
-        return self.embed_documents(texts)
-
-# ---------------------------------------------------------
-# Configuration Mistral
-# ---------------------------------------------------------
-mistral_client = AsyncOpenAI(
-    api_key=MISTRAL_API_KEY,
-    base_url="https://api.mistral.ai/v1",
+mistral_client = Mistral(
+    api_key=MISTRAL_API_KEY
 )
 
-ragas_embeddings = MistralRagasEmbeddings(mistral_client=mistral_client)
 
-# ---------------------------------------------------------
-# Métriques d'évaluation
-# ---------------------------------------------------------
+# ============================================================
+# Vector store
+# ============================================================
 
-metrics=[
-    ContextPrecision(llm=ragas_llm),
-    ContextRecall(llm=ragas_llm),
-    Faithfulness(llm=ragas_llm),
-    AnswerRelevancy(llm=ragas_llm, embeddings=ragas_embeddings,),
-]
+vector_store = VectorStoreManager()
 
-# ---------------------------------------------------------
-# Prompt RAG
-# ---------------------------------------------------------
+
+# ============================================================
+# Prompt
+# ============================================================
 
 SYSTEM_PROMPT = """Tu es un assistant expert sur la NBA.
 
@@ -131,16 +85,23 @@ Règles :
 """
 
 
-# ---------------------------------------------------------
-# Génération de la réponse
-# ---------------------------------------------------------
+# ============================================================
+# Génération de réponse
+# ============================================================
 
-def generate_answer(question, contexts):
+async def generate_answer(
+    question: str,
+    contexts: list[str],
+) -> str:
 
-    context_str = "\n\n---\n\n".join(contexts)
+    context_str = "\n\n---\n\n".join(
+        contexts
+    )
 
     messages = [
-        SystemMessage(content=SYSTEM_PROMPT),
+        SystemMessage(
+            content=SYSTEM_PROMPT
+        ),
         HumanMessage(
             content=(
                 f"CONTEXTE :\n\n"
@@ -148,94 +109,98 @@ def generate_answer(question, contexts):
                 f"QUESTION :\n"
                 f"{question}"
             )
+        ),
+    ]
+
+    response = await llm.ainvoke(
+        messages
+    )
+
+    return str(response.content)
+
+
+# ============================================================
+# Evaluation
+# ============================================================
+
+async def evaluate_all():
+
+    # ---------------------------------
+    # Chargement des cas de test
+    # ---------------------------------
+
+    with open(
+        "tests/evaluation/rag_test_cases.json",
+        "r",
+        encoding="utf-8",
+    ) as f:
+
+        test_data = json.load(f)
+
+    # ---------------------------------
+    # Evaluateur Ragas
+    # ---------------------------------
+
+    # NOUVEAU : On ouvre proprement le client Mistral en mode Asynchrone
+    # pour que l'évaluateur Ragas et vos embeddings puissent l'utiliser sans planter
+    async with Mistral(api_key=MISTRAL_API_KEY) as mistral_client:
+
+        evaluator = RAGasEvaluator(
+            vector_store=vector_store,
+            mistral_client=mistral_client,
+            llm=llm,
+            search_k=SEARCH_K,
+            answer_fn=generate_answer,
         )
-    ]
 
-    response = ragas_llm.invoke(messages)
+        results = []
 
-    return response.content
+    # ---------------------------------
+    # Evaluation de chaque question
+    # ---------------------------------
+
+        for i, item in enumerate(test_data):
+
+            question = item["question"]
+
+            logging.info(
+                "[%d/%d] %s",
+                i + 1,
+                len(test_data),
+                question,
+            )
+
+            result = await evaluator.evaluate_case(
+                question=question,
+                reference=item["reference"],
+            )
+
+            results.append(result)
+
+            print()
+            print("=" * 80)
+            print(question)
+            print("=" * 80)
+
+            print(
+                "Faithfulness :",
+                result["faithfulness"],
+            )
+
+            print(
+                "Response Relevancy :",
+                result["response_relevancy"],
+            )
+
+        return results
 
 
-# ---------------------------------------------------------
-# Chargement du dataset
-# ---------------------------------------------------------
+# ============================================================
+# Appel evaluate en asynchrone
+# ============================================================
 
-with open(
-    "tests/evaluation/rag_test_cases.json",
-    "r",
-    encoding="utf-8"
-) as f:
-    test_data = json.load(f)
+if __name__ == "__main__":
 
-
-# ---------------------------------------------------------
-# Initialisation du Vector Store
-# ---------------------------------------------------------
-
-vector_store = VectorStoreManager()
-
-
-# ---------------------------------------------------------
-# Construction du dataset Ragas
-# ---------------------------------------------------------
-
-ragas_data = []
-
-
-for i, item in enumerate(test_data):
-
-    question = item["question"]
-    reference = item["reference"]
-
-    logging.info(
-        f"[{i + 1}/{len(test_data)}] {question}"
+    asyncio.run(
+        evaluate_all()
     )
-
-    # Recherche FAISS
-    search_results = vector_store.search(
-        question,
-        k=SEARCH_K
-    )
-
-    contexts = [
-        result["text"]
-        for result in search_results
-    ]
-
-    # Génération Qwen
-    answer = generate_answer(
-        question,
-        contexts
-    )
-
-    ragas_data.append({
-        "user_input": question,
-        "retrieved_contexts": contexts,
-        "response": answer,
-        "reference": reference
-    })
-
-
-# ---------------------------------------------------------
-# Dataset Ragas
-# ---------------------------------------------------------
-
-dataset = Dataset.from_list(ragas_data)
-
-
-# ---------------------------------------------------------
-# Evaluation Ragas
-# ---------------------------------------------------------
-
-result = evaluate(
-    dataset,
-    metrics=metrics
-    
-)
-
-
-print("\n==============================")
-print("RESULTATS RAGAS")
-print("==============================")
-
-print(result)
