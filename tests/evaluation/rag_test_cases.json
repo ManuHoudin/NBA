@@ -1,23 +1,43 @@
 [
     {
-        "question": "Quelle équipe a remporté le championnat NBA en 2024 ?",
-        "reference": "Les Boston Celtics ont remporté le championnat NBA en 2024."
+        "question": "Quelle est la moyenne de points par match de Nikola Jokić ?",
+        "reference": "2072"
     },
     {
-        "question": "Qui a remporté le championnat NBA en 2023 ?",
-        "reference": "Les Denver Nuggets ont remporté le championnat NBA en 2023."
+        "question": "Combien de contres a totalisé Victor Wenbanyama ?",
+        "reference": "175"
     },                                                                            
     {
-        "question": "Qui a été le MVP de la saison NBA 2023-2024 ?",
-        "reference": "Le MVP de la saison NBA 2023-2024 était Nikola Jokic."
+        "question": "Qui marque le plus de points par match en moyenne entre Nikola Jokić et Victor Wenbanyama ?",
+        "reference": "Nikola Jokić."
     },
     {
-        "question": "Quel joueur a été le meilleur marqueur de la saison NBA 2023-2024 ?",
-        "reference": "Le meilleur marqueur de la saison NBA 2023-2024 était Joel Embiid."
-    }
+        "question": "Parmi les joueurs de SAS, lesquels ont une moyenne d'au moins 20 points par match ?",
+        "reference": "De'Aaron Fox, Stephon Castle, Victor Wembanyama, Devin Vassell, Harrison Barnes, Keldon Johnson, Julian Champagnie, Chris Paul, Jeremy Sochan, Sandro Mamukelashvili, Malaki Branham, Blake Wesley, Charles Bassey, Bismack Biyombo, Jordan McLaughlin."
+    },
     {
-        "question": "Quel joueur a le meilleur % à 3 points sur les 5 derniers matchs ?",
-        "reference": "Le joueur ayant le meilleur pourcentage à 3 points sur les 5 derniers matchs est Zach LaVine."
+        "question": "Quels joueurs combinent un pourcentage de réussite aux tirs par match supérieur à 60 et un pourcentage de tirs à 3 points tentés par match supérieur à 10 ?",
+        "reference": "Giannis Antetokounmpo, Walker Kessler, Brandon Clarke, Goga Bitadze, Daeqwon Plowden"
+    },
+    {
+        "question": "Quel est le ratio entre Tirs réussis par match et Tirs tentés par match de LeBron James ?",
+        "reference": "0,51"
+    },
+    {
+        "question": "Que reprochent les fans à Reggie Miller dans les discussions ?",
+        "reference": "Les fans lui reprochent surtout de ne pas avoir été un scoreur assez prolifique ni un joueur dominant en un-contre-un, malgré son statut de première option offensive, et estiment qu’il était moins complet que d’autres grands arrières."
+    },
+    {
+        "question": "Pourquoi certains disent que Reggie Miller est surcoté ?",
+        "reference": "Certains jugent Reggie Miller surcoté parce que son volume de scoring et son taux d’utilisation étaient relativement faibles pour une première option, qu’il créait moins facilement son tir balle en main et que son efficacité statistique ne suffit pas, selon eux, à le placer au niveau des plus grands scoreurs."
+    },
+    {
+        "question": "Les statistiques des Orlando Magic vont-elles dans le sens des critiques exprimées par les fans ?",
+        "reference": "Les statistiques ne vont pas dans le même sens que les bonnes critiques des fans car le nombre de points total de l'équipe des Orlando Magic est inférieur à la moyenne des équipes."
+    },
+    {
+        "question": "Quelles équipes ont remporté des matchs cette année ?",
+        "reference": "Pas de données suffisantes pour répondre à cette question."
     }
 
 ]

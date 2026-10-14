@@ -4,6 +4,7 @@ import pickle
 import faiss
 import numpy as np
 import logging
+import logfire
 from typing import List, Dict, Tuple, Optional, Any
 
 from mistralai.client import Mistral, errors
@@ -208,71 +209,73 @@ class VectorStoreManager:
              return []
 
         logging.info(f"Recherche des {k} chunks les plus pertinents pour: '{query_text}'")
-        try:
-            # 1. Générer l'embedding de la requête
-            response = self.mistral_client.embeddings.create(
-                model=EMBEDDING_MODEL,
-                inputs=[query_text],
-            )
-            query_embedding = np.array([response.data[0].embedding]).astype('float32')
+        
+        with logfire.span("RAG - recherche dans l'index vectoriel"):
+            try:
+                # 1. Générer l'embedding de la requête
+                response = self.mistral_client.embeddings.create(
+                    model=EMBEDDING_MODEL,
+                    inputs=[query_text],
+                )
+                query_embedding = np.array([response.data[0].embedding]).astype('float32')
 
-            # Normaliser l'embedding de la requête pour la similarité cosinus
-            faiss.normalize_L2(query_embedding)
+                # Normaliser l'embedding de la requête pour la similarité cosinus
+                faiss.normalize_L2(query_embedding)
 
-            # 2. Rechercher dans l'index Faiss
-            # Pour IndexFlatIP: scores = produit scalaire (plus grand = meilleur)
-            # indices: index des chunks correspondants dans self.document_chunks
-            # Demander plus de résultats si un score minimum est spécifié
-            search_k = k * 3 if min_score is not None else k
-            scores, indices = self.index.search(x=query_embedding, k=search_k)
+                # 2. Rechercher dans l'index Faiss
+                # Pour IndexFlatIP: scores = produit scalaire (plus grand = meilleur)
+                # indices: index des chunks correspondants dans self.document_chunks
+                # Demander plus de résultats si un score minimum est spécifié
+                search_k = k * 3 if min_score is not None else k
+                scores, indices = self.index.search(x=query_embedding, k=search_k)
 
-            # 3. Formater les résultats
-            results = []
-            if indices.size > 0: # Vérifier s'il y a des résultats
-                for i, idx in enumerate(indices[0]):
-                    if 0 <= idx < len(self.document_chunks): # Vérifier la validité de l'index
-                        chunk = self.document_chunks[idx]
-                        # Convertir le score en similarité (0-1)
-                        # Pour IndexFlatIP avec vecteurs normalisés, le score est déjà entre -1 et 1
-                        # On le convertit en pourcentage (0-100%)
-                        raw_score = float(scores[0][i])
-                        similarity = raw_score * 100
+                # 3. Formater les résultats
+                results = []
+                if indices.size > 0: # Vérifier s'il y a des résultats
+                    for i, idx in enumerate(indices[0]):
+                        if 0 <= idx < len(self.document_chunks): # Vérifier la validité de l'index
+                            chunk = self.document_chunks[idx]
+                            # Convertir le score en similarité (0-1)
+                            # Pour IndexFlatIP avec vecteurs normalisés, le score est déjà entre -1 et 1
+                            # On le convertit en pourcentage (0-100%)
+                            raw_score = float(scores[0][i])
+                            similarity = raw_score * 100
 
-                        # Filtrer les résultats en fonction du score minimum
-                        # Le min_score est entre 0 et 1, mais similarity est en pourcentage (0-100)
-                        min_score_percent = min_score * 100 if min_score is not None else 0
-                        if min_score is not None and similarity < min_score_percent:
-                            logging.debug(f"Document filtré (score {similarity:.2f}% < minimum {min_score_percent:.2f}%)")
-                            continue
+                            # Filtrer les résultats en fonction du score minimum
+                            # Le min_score est entre 0 et 1, mais similarity est en pourcentage (0-100)
+                            min_score_percent = min_score * 100 if min_score is not None else 0
+                            if min_score is not None and similarity < min_score_percent:
+                                logging.debug(f"Document filtré (score {similarity:.2f}% < minimum {min_score_percent:.2f}%)")
+                                continue
 
-                        results.append({
-                            "score": similarity, # Score de similarité en pourcentage
-                            "raw_score": raw_score, # Score brut pour débogage
-                            "text": chunk["text"],
-                            "metadata": chunk["metadata"] # Contient source, category, chunk_id_in_doc, start_index etc.
-                        })
-                    else:
-                        logging.warning(f"Index Faiss {idx} hors limites (taille des chunks: {len(self.document_chunks)}).")
+                            results.append({
+                                "score": similarity, # Score de similarité en pourcentage
+                                "raw_score": raw_score, # Score brut pour débogage
+                                "text": chunk["text"],
+                                "metadata": chunk["metadata"] # Contient source, category, chunk_id_in_doc, start_index etc.
+                            })
+                        else:
+                            logging.warning(f"Index Faiss {idx} hors limites (taille des chunks: {len(self.document_chunks)}).")
 
-            # Trier par score (similarité la plus élevée en premier)
-            results.sort(key=lambda x: x["score"], reverse=True)
+                # Trier par score (similarité la plus élevée en premier)
+                results.sort(key=lambda x: x["score"], reverse=True)
 
-            # Limiter au nombre demandé (k) si nécessaire
-            if len(results) > k:
-                results = results[:k]
+                # Limiter au nombre demandé (k) si nécessaire
+                if len(results) > k:
+                    results = results[:k]
 
-            if min_score is not None:
-                min_score_percent = min_score * 100
-                logging.info(f"{len(results)} chunks pertinents trouvés (score minimum: {min_score_percent:.2f}%).")
-            else:
-                logging.info(f"{len(results)} chunks pertinents trouvés.")
+                if min_score is not None:
+                    min_score_percent = min_score * 100
+                    logging.info(f"{len(results)} chunks pertinents trouvés (score minimum: {min_score_percent:.2f}%).")
+                else:
+                    logging.info(f"{len(results)} chunks pertinents trouvés.")
 
-            return results
+                return results
 
-        except errors.MistralError as se:
-            logging.error(f"Erreur API Mistral lors de la génération de l'embedding de la requête: {se}")
-            logging.error(f"  Détails: Status Code={se.status_code}, Message={se.message}")
-            return []
-        except Exception as e:
-            logging.error(f"Erreur inattendue lors de la recherche: {e}")
-            return []
+            except errors.MistralError as se:
+                logging.error(f"Erreur API Mistral lors de la génération de l'embedding de la requête: {se}")
+                logging.error(f"  Détails: Status Code={se.status_code}, Message={se.message}")
+                return []
+            except Exception as e:
+                logging.error(f"Erreur inattendue lors de la recherche: {e}")
+                return []
