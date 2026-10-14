@@ -4,6 +4,11 @@ import logging
 
 from langchain_openai import ChatOpenAI
 from langchain_core.messages import SystemMessage, HumanMessage
+from pydantic_ai import Agent
+from pydantic_ai.models.openai import OpenAIChatModel
+from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.settings import ModelSettings
+
 from dotenv import load_dotenv
 
 # --- Importations depuis vos modules ---
@@ -17,6 +22,18 @@ except ImportError as e:
     st.error(f"Erreur d'importation: {e}. Vérifiez la structure de vos dossiers et les fichiers dans 'utils'.")
     st.stop()
 
+# Configuration de l'observabilité en premier
+import logfire
+
+logfire.configure()
+# Trace les exécutions de l'agent Pydantic AI
+logfire.instrument_pydantic_ai()
+
+# Trace les validations Pydantic qui échouent
+logfire.instrument_pydantic(record="failure")
+
+# Les modèles Pydantic sont importés ensuite
+from utils.format_control import UserQuery, RAGResponse, SearchResult
 
 # --- Configuration du Logging ---
 # Note: Streamlit peut avoir sa propre gestion de logs. Configurer ici est une bonne pratique.
@@ -26,24 +43,45 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 api_key = DASHSCOPE_API_KEY
 model = MODEL_NAME
 
+qwen_model = OpenAIChatModel(
+    model_name=model,
+    provider=OpenAIProvider(
+        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+        api_key=api_key,
+    ),
+)
+
 if not api_key:
     st.error("Erreur : Clé API Qwen non trouvée (DASHSCOPE_API_KEY). Veuillez la définir dans le fichier .env.")
     st.stop()
 
-try:
-    #client = MistralClient(api_key=api_key)
-    client = ChatOpenAI(
-        model=model,
-        api_key=api_key,
-        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        temperature=0.2,
-        extra_body={"enable_thinking": False}
-    )
-    logging.info("Client Qwen3.8-flash initialisé.")
-except Exception as e:
-    st.error(f"Erreur lors de l'initialisation du client Qwen : {e}")
-    logging.exception("Erreur initialisation client Qwen")
-    st.stop()
+# Prompt pour l'agent Pydantic AI
+rag_agent = Agent(
+    qwen_model,
+    output_type=RAGResponse,
+    model_settings=ModelSettings(extra_body={"enable_thinking": False}),
+    system_prompt=(
+        "Tu es 'NBA Analyst AI', un assistant expert sur la ligue de basketball NBA. "
+        "Tu réponds aux questions des fans en te basant uniquement sur le contexte "
+        "fourni par la base de connaissances. "
+        "Si le contexte ne permet pas de répondre, indique-le clairement."
+    ),
+)
+
+# try:
+#     #client = MistralClient(api_key=api_key)
+#     client = ChatOpenAI(
+#         model=model,
+#         api_key=api_key,
+#         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+#         temperature=0.2,
+#         extra_body={"enable_thinking": False}
+#     )
+#     logging.info("Client Qwen3.8-flash initialisé.")
+# except Exception as e:
+#     st.error(f"Erreur lors de l'initialisation du client Qwen : {e}")
+#     logging.exception("Erreur initialisation client Qwen")
+#     st.stop()
 
 # --- Chargement du Vector Store (mis en cache) ---
 @st.cache_resource # Garde le manager chargé en mémoire pour la session
@@ -93,26 +131,39 @@ if "messages" not in st.session_state:
 
 # --- Fonctions ---
 
-def generer_reponse(messages: list) -> str:
+def generer_reponse(question: str, context_str: str) -> RAGResponse:
     """
-    Envoie le prompt (qui inclut maintenant le contexte) à l'API Qwen.
+    Génère une réponse structurée avec Pydantic AI.
     """
-    if not messages:
-         logging.warning("Tentative de génération de réponse avec un prompt vide.")
-         return "Je ne peux pas traiter une demande vide."
+    if not question:
+        logging.warning("Tentative de génération avec une question vide.")
+        return RAGResponse(
+            answer="Je ne peux pas traiter une demande vide."
+        )
+
     try:
-        logging.info(f"Appel à l'API Qwen modèle '{model}' avec {len(messages)} message(s).")
-        # Log le contenu du prompt (peut être long) - commenter si trop verbeux
-        # logging.debug(f"Prompt envoyé à l'API: {prompt_messages}")
+        logging.info(
+            f"Appel à Qwen via Pydantic AI, modèle '{model}'."
+        )
 
-        response = client.invoke(messages)
+        prompt = (
+            "CONTEXTE DE LA BASE DE CONNAISSANCES\n\n"
+            f"{context_str}\n\n"
+            "QUESTION DU FAN\n\n"
+            f"{question}"
+        )
 
-        return response.content
+        with logfire.span("RAG  - génération de réponse LLM"):
+            result = rag_agent.run_sync(prompt)
+            logfire.info("Réponse générée par l'agent Pydantic AI",  output_type=type(result.output).__name__,)
+
+            return result.output
     
     except Exception as e:
         st.error(f"Erreur lors de l'appel à l'API Qwen: {e}")
         logging.exception("Erreur API Qwen pendant client.chat")
-        return "Je suis désolé, une erreur technique m'empêche de répondre. Veuillez réessayer plus tard."
+        return RAGResponse(
+            answer="Je suis désolé, une erreur technique m'empêche de répondre. Veuillez réessayer plus tard.")
 
 # --- Interface Utilisateur Streamlit ---
 st.title(APP_TITLE)
@@ -124,11 +175,14 @@ for message in st.session_state.messages:
         st.write(message["content"])
 
 # Zone de saisie utilisateur
-if prompt := st.chat_input(f"Posez votre question sur la {NAME}..."):
+prompt = st.chat_input(f"Posez votre question sur la {NAME}...")
+
+if prompt:
+    query = UserQuery(question=prompt)  # Validation du prompt avec Pydantic
     # 1. Ajouter et afficher le message de l'utilisateur
     st.session_state.messages.append({"role": "user", "content": prompt})
     with st.chat_message("user"):
-        st.write(prompt)
+        st.write(query.question)
 
     # === Début de la logique RAG ===
 
@@ -141,39 +195,51 @@ if prompt := st.chat_input(f"Posez votre question sur la {NAME}..."):
 
     # 3. Rechercher le contexte dans le Vector Store
     try:
-        logging.info(f"Recherche de contexte pour la question: '{prompt}' avec k={SEARCH_K}")
-        search_results = vector_store_manager.search(prompt, k=SEARCH_K)
-        logging.info(f"{len(search_results)} chunks trouvés dans le Vector Store.")
+        with logfire.span(
+            "RAG - recherche FAISS",
+            search_k=SEARCH_K,
+        ):
+            search_results = [
+                SearchResult(**result)
+                for result in vector_store_manager.search(
+                    query.question,
+                    k=SEARCH_K,
+                )
+            ]
+
+            logfire.info(
+                "Recherche terminée",
+                result_count=len(search_results),
+                scores=[result.score for result in search_results],
+            )
+
     except Exception as e:
-        st.error(f"Une erreur est survenue lors de la recherche d'informations pertinentes: {e}")
-        logging.exception(f"Erreur pendant vector_store_manager.search pour la query: {prompt}")
-        search_results = [] # On continue sans contexte si la recherche échoue
+        logging.exception("Erreur pendant la recherche FAISS")
+        search_results = []
+
+    # try:
+    #     logging.info(f"Recherche de contexte pour la question: '{query.question}' avec k={SEARCH_K}")
+        
+    #     search_results = [
+    #         SearchResult(**results)
+    #         for results in vector_store_manager.search(query.question, k=SEARCH_K)
+    #     ] 
+    #     logging.info(f"{len(search_results)} chunks trouvés dans le Vector Store.")
+    # except Exception as e:
+    #     st.error(f"Une erreur est survenue lors de la recherche d'informations pertinentes: {e}")
+    #     logging.exception(f"Erreur pendant vector_store_manager.search pour la query: {query.question}")
+    #     search_results = [] # On continue sans contexte si la recherche échoue
 
     # 4. Formater le contexte pour le prompt LLM
-    context_str = "\n\n---\n\n".join([
-        f"Source: {res['metadata'].get('source', 'Inconnue')} (Score: {res['score']:.1f}%)\nContenu: {res['text']}"
-        for res in search_results
-    ])
+    context_str = "\n\n---\n\n".join(
+        f"Source: {res.metadata.get('source', 'Inconnue')}"
+        f"Score: {res.score:.1f}%)\n"
+        f"Contenu: {res.text}"
+    for res in search_results)
 
     if not search_results:
         context_str = "Aucune information pertinente trouvée dans la base de connaissances pour cette question."
-        logging.warning(f"Aucun contexte trouvé pour la query: {prompt}")
-
-    # 5. Construire le prompt final pour l'API Qwen en utilisant le System Prompt RAG
-    final_prompt_for_llm = SYSTEM_PROMPT.format(context_str=context_str, question=prompt)
-
-    # Créer la liste de messages pour l'API (juste le prompt système/utilisateur combiné)
-    messages_for_api = [
-    SystemMessage(content=SYSTEM_PROMPT),
-    HumanMessage(
-        content=(
-            f"CONTEXTE DE LA BASE DE CONNAISSANCES\n\n"
-            f"{context_str}\n\n"
-            f"QUESTION DU FAN\n\n"
-            f"{prompt}"
-        )
-    )
-]
+        logging.warning(f"Aucun contexte trouvé pour la query: {query.question}")
 
     # === Fin de la logique RAG ===
 
@@ -183,14 +249,17 @@ if prompt := st.chat_input(f"Posez votre question sur la {NAME}..."):
         message_placeholder = st.empty()
         message_placeholder.text("...") # Indicateur simple
 
-        # Génération de la réponse de l'assistant en utilisant le prompt augmenté
-        response_content = generer_reponse(messages_for_api)
+        # Génération de la réponse de l'assistant en utilisant le prompt formaté
+        rag_reponse = generer_reponse(
+            question=query.question,
+            context_str=context_str
+        )
 
         # Affichage de la réponse complète
-        message_placeholder.write(response_content)
+        message_placeholder.write(rag_reponse.answer)
 
     # 7. Ajouter la réponse de l'assistant à l'historique (pour affichage UI)
-    st.session_state.messages.append({"role": "assistant", "content": response_content})
+    st.session_state.messages.append({"role": "assistant", "content": rag_reponse.answer})
 
 # Petit pied de page optionnel
 st.markdown("---")
