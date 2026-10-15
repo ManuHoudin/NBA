@@ -1,0 +1,46 @@
+Column name	Label	Table
+Player	Nom du joueur	players
+Team	Équipe du joueur (code à 3 lettres)	players
+Age	Âge du joueur	players
+GP	Nombre de matchs joués (Games Played)	matches
+W	Nombre de victoires de l'équipe lors des matchs joués	matches
+L	Nombre de défaites	matches
+Min	Minutes moyennes jouées par match	matches
+PTS	Points marqués en moyenne par match	matches
+FGM	Tirs réussis par match (Field Goals Made)	matches
+FGA	Tirs tentés par match (Field Goals Attempted)	matches
+FG%	Pourcentage de réussite aux tirs	stats
+15:00	Minutes jouées après 15:00 de jeu	stats
+3PA	Tirs à 3 points tentés par match	matches
+3P%	Pourcentage de réussite à 3 points	stats
+FTM	Lancers francs réussis (Free Throws Made)	stats
+FTA	Lancers francs tentés	stats
+FT%	Pourcentage de réussite aux lancers francs	stats
+OREB	Rebonds offensifs	stats
+DREB	Rebonds défensifs	stats
+REB	Rebonds totaux	stats
+AST	Passes décisives (Assists)	stats
+TOV	Balles perdues (Turnovers)	stats
+STL	Interceptions (Steals)	stats
+BLK	Contres (Blocks)	stats
+PF	Fautes personnelles	stats
+FP	Fantasy Points	stats
+DD2	Double-doubles (≥10 dans deux catégories principales)	
+TD3	Triple-doubles (≥10 dans trois catégories principales)	
++ / -	Plus-Minus (écart de score lorsque le joueur est sur le terrain)	
+OFFRTG	Offensive Rating (points marqués par 100 possessions)	
+DEFRTG	Defensive Rating (points encaissés par 100 possessions)	
+NETRTG	Net Rating = OFFRTG - DEFRTG	
+AST%	Pourcentage d'assists – implication dans les passes décisives	
+AST/TO	Ratio passes / pertes de balle	
+AST RATIO	Ratio d’assists pour 100 possessions	
+OREB%	Pourcentage de rebonds offensifs parmi ceux disponibles	
+DREB%	Idem en défensif	
+REB%	Pourcentage de rebonds totaux parmi ceux disponibles	
+TO RATIO	Turnover Ratio – pertes de balle par 100 possessions	
+EFG%	Effective Field Goal % (pondère les 3 points)	
+TS%	True Shooting % (inclut FG et FT dans l'efficacité)	
+USG%	Usage Rate – % des actions utilisées par le joueur	
+PACE	Rythme de jeu (possessions par 48 minutes)	
+PIE	Player Impact Estimate – évaluation globale de l’impact	
+POSS	Nombre total de possessions jouées	
