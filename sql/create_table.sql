@@ -8,53 +8,59 @@ CREATE TABLE IF NOT EXISTS players (
     age         INTEGER
 );
 
--- 2. Statistiques agrégées sur la saison
+-- 2. Label des équipes
+CREATE TABLE IF NOT EXISTS teams (
+    team        TEXT PRIMARY KEY,
+    team_label   TEXT NOT NULL
+
+);
+
+-- 3. Statistiques agrégées sur la saison
 CREATE TABLE IF NOT EXISTS stats (
-    player_id INTEGER NOT NULL,
-    gp        INTEGER,
+    player_id INTEGER PRIMARY KEY,
+    games_played INTEGER,
     wins      INTEGER,
     losses    INTEGER,
-    minutes   REAL,
-    points    REAL,
-    fgm       REAL,
-    fga       REAL,
-    fg_pct    REAL,
+    average_minutes_match   REAL,
+    average_points_match    REAL,
+    field_goals_made       REAL,
+    field_goals_attempted       REAL,
+    field_goal_percentage    REAL,
     minutes_after_15 REAL,
-    three_pa  REAL,
-    three_pct REAL,
-    ftm       REAL,
-    fta       REAL,
-    ft_pct    REAL,
-    oreb      REAL,
-    dreb      REAL,
-    reb       REAL,
-    ast       REAL,
-    tov       REAL,
-    stl       REAL,
-    blk       REAL,
-    pf        REAL,
+    three_points_attempts  REAL,
+    three_points_percentage REAL,
+    free_throws_made       REAL,
+    free_throws_attempted       REAL,
+    free_throw_percentage    REAL,
+    offensive_rebounds      REAL,
+    defensive_rebounds      REAL,
+    total_rebounds       REAL,
+    assists       REAL,
+    turnovers       REAL,
+    steals       REAL,
+    blocks       REAL,
+    personal_fouls        REAL,
     fantasy_points REAL,
     double_doubles INTEGER,
     triple_doubles INTEGER,
     plus_minus REAL,
-    off_rtg   REAL,
-    def_rtg   REAL,
-    net_rtg   REAL,
-    ast_pct   REAL,
-    ast_to    REAL,
-    ast_ratio REAL,
-    oreb_pct  REAL,
-    dreb_pct  REAL,
-    reb_pct   REAL,
-    to_ratio  REAL,
-    efg_pct   REAL,
-    ts_pct    REAL,
-    usg_pct   REAL,
+    offensive_rating   REAL,
+    defensive_rating   REAL,
+    net_rating   REAL,
+    assists_percentage   REAL,
+    assists_to_turnovers   REAL,
+    assists_ratio_percentage   REAL,
+    offensive_rebound_percentage  REAL,
+    defensive_rebound_percentage  REAL,
+    total_rebound_percentage   REAL,
+    turnover_ratio_percentage  REAL,
+    effective_field_goal_percentage   REAL,
+    true_shooting_percentage    REAL,
+    usage_rate_percentage   REAL,
     pace      REAL,
-    pie       REAL,
-    poss      REAL,
+    player_impact_estimate       REAL,
+    total_possessions      REAL,
 
-    PRIMARY KEY player_id,
 
     FOREIGN KEY (player_id)
         REFERENCES players(player_id)
@@ -64,9 +70,3 @@ CREATE TABLE IF NOT EXISTS stats (
 -- Index pour les filtres SQL courants
 CREATE INDEX IF NOT EXISTS idx_players_team
     ON players(team);
-
-CREATE INDEX IF NOT EXISTS idx_stats_points
-    ON stats(points);
-
-CREATE INDEX IF NOT EXISTS idx_stats_assists
-    ON stats(ast);

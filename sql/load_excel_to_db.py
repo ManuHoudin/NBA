@@ -13,9 +13,10 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError, field_valida
 #BASE_DIR = Path(__file__).resolve().parent
 
 EXCEL_FILE = "inputs/regular NBA.xlsx"
-SQL_FILE = "sql/create_table.sql"
+SQL_FILE = Path(__file__).resolve().parent / "create_table.sql"
 DB_FILE = "sql/nba.db"
 SHEET_NAME = "Données NBA"
+TEAM_SHEET_NAME = "Equipe"
 
 logging.basicConfig(
     level=logging.INFO,
@@ -32,48 +33,48 @@ COLUMN_MAPPING = {
     "Player": "player_name",
     "Team": "team",
     "Age": "age",
-    "GP": "gp",
+    "GP": "games_played",
     "W": "wins",
     "L": "losses",
-    "Min": "minutes",
-    "PTS": "points",
-    "FGM": "fgm",
-    "FGA": "fga",
-    "FG%": "fg_pct",
+    "Min": "average_minutes_match",
+    "PTS": "average_points_match",
+    "FGM": "field_goals_made",
+    "FGA": "field_goals_attempted",
+    "FG%": "field_goal_percentage",
     "15:00:00": "minutes_after_15",
-    "3PA": "three_pa",
-    "3P%": "three_pct",
-    "FTM": "ftm",
-    "FTA": "fta",
-    "FT%": "ft_pct",
-    "OREB": "oreb",
-    "DREB": "dreb",
-    "REB": "reb",
-    "AST": "ast",
-    "TOV": "tov",
-    "STL": "stl",
-    "BLK": "blk",
-    "PF": "pf",
+    "3PA": "three_points_attempts",
+    "3P%": "three_points_percentage",
+    "FTM": "free_throws_made",
+    "FTA": "free_throws_attempted",
+    "FT%": "free_throw_percentage",
+    "OREB": "offensive_rebounds",
+    "DREB": "defensive_rebounds",
+    "REB": "total_rebounds",
+    "AST": "assists",
+    "TOV": "turnovers",
+    "STL": "steals",
+    "BLK": "blocks",
+    "PF": "personal_fouls",
     "FP": "fantasy_points",
     "DD2": "double_doubles",
     "TD3": "triple_doubles",
     "+/-": "plus_minus",
-    "OFFRTG": "off_rtg",
-    "DEFRTG": "def_rtg",
-    "NETRTG": "net_rtg",
-    "AST%": "ast_pct",
-    "AST/TO": "ast_to",
-    "AST RATIO": "ast_ratio",
-    "OREB%": "oreb_pct",
-    "DREB%": "dreb_pct",
-    "REB%": "reb_pct",
-    "TO RATIO": "to_ratio",
-    "EFG%": "efg_pct",
-    "TS%": "ts_pct",
-    "USG%": "usg_pct",
+    "OFFRTG": "offensive_rating",
+    "DEFRTG": "defensive_rating",
+    "NETRTG": "net_rating",
+    "AST%": "assists_percentage",
+    "AST/TO": "assists_to_turnovers",
+    "AST RATIO": "assists_ratio_percentage",
+    "OREB%": "offensive_rebound_percentage",
+    "DREB%": "defensive_rebound_percentage",
+    "REB%": "total_rebound_percentage",
+    "TO RATIO": "turnover_ratio_percentage",
+    "EFG%": "effective_field_goal_percentage",
+    "TS%": "true_shooting_percentage",
+    "USG%": "usage_rate_percentage",
     "PACE": "pace",
-    "PIE": "pie",
-    "POSS": "poss",
+    "PIE": "player_impact_estimate",
+    "POSS": "total_possessions",
 }
 
 
@@ -88,54 +89,54 @@ class NBAPlayerRow(BaseModel):
     team: str = Field(min_length=1)
     age: int | None = Field(default=None, ge=0)
 
-    gp: int | None = Field(default=None, ge=0)
+    games_played: int | None = Field(default=None, ge=0)
     wins: int | None = Field(default=None, ge=0)
     losses: int | None = Field(default=None, ge=0)
 
-    minutes: float | None = Field(default=None, ge=0)
-    points: float | None = Field(default=None, ge=0)
-    fgm: float | None = Field(default=None, ge=0)
-    fga: float | None = Field(default=None, ge=0)
-    fg_pct: float | None = Field(default=None, ge=0, le=100)
+    average_minutes_match: float | None = Field(default=None, ge=0)
+    average_points_match: float | None = Field(default=None, ge=0)
+    field_goals_made: float | None = Field(default=None, ge=0)
+    field_goals_attempted: float | None = Field(default=None, ge=0)
+    field_goal_percentage: float | None = Field(default=None, ge=0, le=100)
     minutes_after_15: float | None = Field(default=None, ge=0)
 
-    three_pa: float | None = Field(default=None, ge=0)
-    three_pct: float | None = Field(default=None, ge=0, le=100)
+    three_points_attempts: float | None = Field(default=None, ge=0)
+    three_points_percentage: float | None = Field(default=None, ge=0, le=100)
 
-    ftm: float | None = Field(default=None, ge=0)
-    fta: float | None = Field(default=None, ge=0)
-    ft_pct: float | None = Field(default=None, ge=0, le=100)
+    free_throws_made: float | None = Field(default=None, ge=0)
+    free_throws_attempted: float | None = Field(default=None, ge=0)
+    free_throw_percentage: float | None = Field(default=None, ge=0, le=100)
 
-    oreb: float | None = Field(default=None, ge=0)
-    dreb: float | None = Field(default=None, ge=0)
-    reb: float | None = Field(default=None, ge=0)
-    ast: float | None = Field(default=None, ge=0)
-    tov: float | None = Field(default=None, ge=0)
-    stl: float | None = Field(default=None, ge=0)
-    blk: float | None = Field(default=None, ge=0)
-    pf: float | None = Field(default=None, ge=0)
+    offensive_rebounds: float | None = Field(default=None, ge=0)
+    defensive_rebounds: float | None = Field(default=None, ge=0)
+    total_rebounds: float | None = Field(default=None, ge=0)
+    assists: float | None = Field(default=None, ge=0)
+    turnovers: float | None = Field(default=None, ge=0)
+    steals: float | None = Field(default=None, ge=0)
+    blocks: float | None = Field(default=None, ge=0)
+    personal_fouls: float | None = Field(default=None, ge=0)
     fantasy_points: float | None = None
 
     double_doubles: int | None = Field(default=None, ge=0)
     triple_doubles: int | None = Field(default=None, ge=0)
     plus_minus: float | None = None
 
-    off_rtg: float | None = None
-    def_rtg: float | None = None
-    net_rtg: float | None = None
-    ast_pct: float | None = Field(default=None, ge=0, le=100)
-    ast_to: float | None = Field(default=None, ge=0)
-    ast_ratio: float | None = Field(default=None, ge=0)
-    oreb_pct: float | None = Field(default=None, ge=0, le=100)
-    dreb_pct: float | None = Field(default=None, ge=0, le=100)
-    reb_pct: float | None = Field(default=None, ge=0, le=100)
-    to_ratio: float | None = Field(default=None, ge=0)
-    efg_pct: float | None = Field(default=None, ge=0, le=100)
-    ts_pct: float | None = Field(default=None, ge=0, le=100)
-    usg_pct: float | None = Field(default=None, ge=0, le=100)
+    offensive_rating: float | None = None
+    defensive_rating: float | None = None
+    net_rating: float | None = None
+    assists_percentage: float | None = Field(default=None, ge=0, le=100)
+    assists_to_turnovers: float | None = Field(default=None, ge=0)
+    assists_ratio_percentage: float | None = Field(default=None, ge=0, le=100)
+    offensive_rebound_percentage: float | None = Field(default=None, ge=0, le=100)
+    defensive_rebound_percentage: float | None = Field(default=None, ge=0, le=100)
+    total_rebound_percentage: float | None = Field(default=None, ge=0, le=100)
+    turnover_ratio_percentage: float | None = Field(default=None, ge=0)
+    effective_field_goal_percentage: float | None = Field(default=None, ge=0, le=100)
+    true_shooting_percentage: float | None = Field(default=None, ge=0, le=100)
+    usage_rate_percentage: float | None = Field(default=None, ge=0, le=100)
     pace: float | None = Field(default=None, ge=0)
-    pie: float | None = None
-    poss: float | None = Field(default=None, ge=0)
+    player_impact_estimate: float | None = None
+    total_possessions: float | None = Field(default=None, ge=0)
 
     @field_validator("*", mode="before")
     @classmethod
@@ -176,7 +177,7 @@ def validate_percentage(value):
 def load_and_validate_excel() -> list[NBAPlayerRow]:
     if not EXCEL_FILE:
         raise FileNotFoundError(
-            f"Fichier Excel introuvable : {EXCEL_FILE}"
+            f"Fichier Excel introuvable : {EXCEL_FILE.resolve()}"
         )
 
     df = pd.read_excel(EXCEL_FILE, sheet_name=SHEET_NAME, skiprows=1)
@@ -204,12 +205,16 @@ def load_and_validate_excel() -> list[NBAPlayerRow]:
         data = row.to_dict()
 
         # on contrôle les pourcentages avant la validation Pydantic
-        PERCENTAGE_COLUMNS = ["fg_pct", "three_pct", "ft_pct", "ast_pct",
-        "oreb_pct", "dreb_pct", "reb_pct", "efg_pct", "ts_pct", "usg_pct"]
+        PERCENTAGE_COLUMNS = ["field_goal_percentage", "three_points_percentage", "free_throw_percentage", "assists_percentage",
+        "net_rating", "effective_field_goal_percentage", "true_shooting_percentage", "usage_rate_percentage"]
 
         for col in PERCENTAGE_COLUMNS:
-            if col in row:
-                row[col] = validate_percentage(row[col])
+            value = data.get(col)
+
+            if value is not None and pd.notna(value):
+                if not 0 <= float(value) <= 100:
+                    print(f"Correction : {col} = {value} -> None")
+                    data[col] = None
 
         # Validation Pydantic
         try:
@@ -266,27 +271,60 @@ def load_and_validate_excel() -> list[NBAPlayerRow]:
 # --------------------------------------------------
 
 STAT_COLUMNS = [
-    "gp", "wins", "losses", "minutes", "points",
-    "fgm", "fga", "fg_pct", "minutes_after_15",
-    "three_pa", "three_pct", "ftm", "fta", "ft_pct",
-    "oreb", "dreb", "reb", "ast", "tov", "stl", "blk",
-    "pf", "fantasy_points", "double_doubles", "triple_doubles",
-    "plus_minus", "off_rtg", "def_rtg", "net_rtg",
-    "ast_pct", "ast_to", "ast_ratio", "oreb_pct",
-    "dreb_pct", "reb_pct", "to_ratio", "efg_pct",
-    "ts_pct", "usg_pct", "pace", "pie", "poss",
+    "games_played", "wins", "losses", "average_minutes_match", "average_points_match",
+    "field_goals_made", "field_goals_attempted", "field_goal_percentage", "minutes_after_15",
+    "three_points_attempts", "three_points_percentage", "free_throws_made", "free_throws_attempted", "free_throw_percentage",
+    "offensive_rebounds", "defensive_rebounds", "total_rebounds", "assists", "turnovers", "steals", "blocks",
+    "personal_fouls", "fantasy_points", "double_doubles", "triple_doubles",
+    "plus_minus", "offensive_rating", "defensive_rating", "net_rating",
+    "assists_percentage", "assists_to_turnovers", "assists_ratio_percentage", "offensive_rebound_percentage",
+    "defensive_rebound_percentage", "total_rebound_percentage", "turnover_ratio_percentage", "effective_field_goal_percentage",
+    "true_shooting_percentage", "usage_rate_percentage", "pace", "player_impact_estimate", "total_possessions",
 ]
 
+def load_teams(conn):
+    # Lecture de l'onglet Equipe
+    df_teams = pd.read_excel(
+        EXCEL_FILE,
+        sheet_name=TEAM_SHEET_NAME,
+        skiprows=1 
+    )
+
+    teams = []
+
+    for _, row in df_teams.iterrows():
+        team = str(row.iloc[0]).strip()
+        team_label = str(row.iloc[1]).strip()
+
+        # Ignorer les lignes incomplètes
+        if not team or not team_label or team == "nan" or team_label == "nan":
+            continue
+
+        teams.append((team, team_label))
+
+    # Insertion ou mise à jour des équipes
+    conn.executemany(
+        """
+        INSERT OR REPLACE INTO teams (team, team_label)
+        VALUES (?, ?)
+        """,
+        teams
+    )
+
+    print(f"{len(teams)} équipes chargées dans la table teams.")
 
 def create_tables(conn: sqlite3.Connection) -> None:
     if not SQL_FILE.exists():
         raise FileNotFoundError(
-            f"Fichier SQL introuvable : {SQL_FILE}"
+            f"Fichier SQL introuvable : {SQL_FILE.resolve()}"
         )
 
-    with open(SQL_FILE, "r", encoding="utf-8") as SQL_FILE:
-        sql_script = SQL_FILE.read()
-    
+    with SQL_FILE.open("r", encoding="utf-8") as sql_file:
+        sql_script = sql_file.read()
+
+    for i, line in enumerate(sql_script.splitlines(), start=1):
+        print(f"{i:3}: {line}")
+
     conn.executescript(sql_script)
 
     logger.info("Script create_table.sql exécuté.")
@@ -339,6 +377,7 @@ def main() -> None:
         # En cas d'erreur, les insertions de la transaction sont annulées.
         with conn:
             create_tables(conn)
+            load_teams(conn)
             insert_players(conn, players)
 
     logger.info(
