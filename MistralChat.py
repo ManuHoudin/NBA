@@ -1,8 +1,10 @@
 import streamlit as st
 import logging
+import json
 
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.tools import tool
+from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
 from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
@@ -43,6 +45,7 @@ logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(
 api_key = DASHSCOPE_API_KEY
 model = MODEL_NAME
 
+# --- Initialisation du modèle Qwen3.8-flash via Pydantic AI ---
 qwen_model = OpenAIChatModel(
     model_name=model,
     provider=OpenAIProvider(
@@ -68,8 +71,17 @@ rag_agent = Agent(
     ),
 )
 
+# Modèle LangChain : sélection et appel des outils
+qwen_langchain = ChatOpenAI(
+    model=model,
+    base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+    api_key=api_key,
+    temperature=0,
+    extra_body={"enable_thinking": False},
+)
+
 # --- Configuration SQL ---
-ask_database = create_sql_tool(qwen_model)
+ask_database = create_sql_tool(qwen_langchain)
 
 # try:
 #     #client = MistralClient(api_key=api_key)
@@ -132,6 +144,160 @@ if "messages" not in st.session_state:
     # Message d'accueil initial
     st.session_state.messages = [{"role": "assistant", "content": f"Bonjour ! Je suis votre analyste IA pour la {NAME}. Posez-moi vos questions sur les équipes, les joueurs ou les statistiques, et je vous répondrai en me basant sur les données les plus récentes."}]
 
+
+# --- Outils LangChain : SQL et FAISS ---
+
+def build_nba_tools(ask_database, vector_store_manager):
+
+    @tool("nba_sql_tool")
+    def nba_sql_tool(question: str) -> str:
+        """Interroge les tables SQL NBA pour les questions chiffrées :
+        statistiques de joueurs, classements, moyennes, totaux,
+        comparaisons statistiques et statistiques par équipe."""
+        response = ask_database(question)
+
+        if response["error"]:
+            return json.dumps(
+                {"error": response["error"]},
+                ensure_ascii=False,
+            )
+
+        return json.dumps(
+            {
+                "query": response["query"],
+                "result": response["result"],
+            },
+            ensure_ascii=False,
+            default=str,
+        )
+
+    @tool("faiss_search_tool")
+    def faiss_search_tool(question: str) -> str:
+        """Recherche dans la base documentaire FAISS les informations
+        utiles aux questions qualitatives, explicatives ou contextuelles
+        sur la NBA. Retourne les passages pertinents trouvés."""
+        if vector_store_manager is None:
+            return "Erreur : la base documentaire FAISS est indisponible."
+
+        try:
+            search_results = [
+                SearchResult(**result)
+                for result in vector_store_manager.search(
+                    question,
+                    k=SEARCH_K,
+                )
+            ]
+
+            if not search_results:
+                return "Aucun passage pertinent trouvé dans FAISS."
+
+            return "\n\n---\n\n".join(
+                f"Source : {res.metadata.get('source', 'Inconnue')}\n"
+                f"Score : {res.score}\n"
+                f"Contenu : {res.text}"
+                for res in search_results
+            )
+
+        except Exception as exc:
+            logging.exception("Erreur pendant la recherche FAISS")
+            return f"Erreur pendant la recherche documentaire : {exc}"
+
+    return [nba_sql_tool, faiss_search_tool]
+
+
+nba_tools = build_nba_tools(
+    ask_database=ask_database,
+    vector_store_manager=vector_store_manager,
+)
+
+nba_tools_by_name = {tool.name: tool for tool in nba_tools}
+
+# Le modèle sait désormais appeler les outils déclarés.
+qwen_with_tools = qwen_langchain.bind_tools(
+    nba_tools,
+    parallel_tool_calls=False,
+)
+
+
+# --- Routage et synthèse avec LangChain ---
+
+ROUTER_SYSTEM_PROMPT = """
+Tu es NBA Analyst AI, un assistant expert sur la NBA.
+
+Pour répondre à chaque question, choisis exactement un outil :
+
+- nba_sql_tool :
+  pour les statistiques chiffrées, classements, moyennes,
+  totaux, comparaisons de joueurs et statistiques d'équipes.
+
+- faiss_search_tool :
+  pour les questions explicatives, qualitatives, historiques
+  ou nécessitant des informations issues de la base documentaire.
+
+Appelle l'outil approprié avant de répondre.
+Ne réponds pas à partir de tes seules connaissances si un outil
+peut fournir les informations nécessaires.
+N'invente aucune statistique ni aucun résultat.
+
+Après réception du résultat de l'outil, rédige une réponse
+claire en français, en te fondant sur ce résultat.
+Si l'outil renvoie une erreur ou ne trouve pas l'information,
+explique-le explicitement.
+"""
+
+
+def traiter_question_avec_tools(question: str) -> str:
+    """Choisit un outil, l'exécute, puis synthétise sa réponse."""
+
+    messages = [
+        SystemMessage(content=ROUTER_SYSTEM_PROMPT),
+        HumanMessage(content=question),
+    ]
+
+    try:
+        # Appel 1 : Qwen choisit un outil.
+        ai_message = qwen_with_tools.invoke(messages)
+        messages.append(ai_message)
+
+        # Si aucun outil n'est appelé, retourner la réponse du modèle.
+        if not ai_message.tool_calls:
+            return ai_message.content or (
+                "Je n'ai pas pu déterminer comment traiter la question."
+            )
+
+        # Exécuter les outils demandés.
+        # Le prompt demande un seul outil ; cette boucle gère aussi
+        # correctement le cas où le modèle en demande plusieurs.
+        for tool_call in ai_message.tool_calls:
+            selected_tool = nba_tools_by_name.get(tool_call["name"])
+
+            if selected_tool is None:
+                tool_result = (
+                    f"Erreur : outil inconnu {tool_call['name']}."
+                )
+            else:
+                tool_result = selected_tool.invoke(tool_call["args"])
+
+            messages.append(
+                ToolMessage(
+                    content=str(tool_result),
+                    tool_call_id=tool_call["id"],
+                )
+            )
+
+        # Appel final : Qwen synthétise les résultats des outils.
+        final_message = qwen_langchain.invoke(messages)
+
+        if isinstance(final_message.content, str):
+            return final_message.content
+
+        return str(final_message.content)
+
+    except Exception as exc:
+        logging.exception("Erreur dans le routage LangChain")
+        return f"Une erreur technique est survenue : {exc}"
+
+
 # --- Fonctions ---
 
 def generer_reponse(question: str, context_str: str) -> RAGResponse:
@@ -189,80 +355,22 @@ if prompt:
 
     # === Début de la logique RAG ===
 
-    # 2. Vérifier si le Vector Store est disponible
-    if vector_store_manager is None:
-        st.error("Le service de recherche de connaissances n'est pas disponible. Impossible de traiter votre demande.")
-        logging.error("VectorStoreManager non disponible pour la recherche.")
-        # On arrête ici car on ne peut pas faire de RAG
-        st.stop()
+    # === Traitement de la question avec les outils LangChain ===
 
-    # 3. Rechercher le contexte dans le Vector Store
-    try:
-        with logfire.span(
-            "RAG - recherche FAISS",
-            search_k=SEARCH_K,
-        ):
-            search_results = [
-                SearchResult(**result)
-                for result in vector_store_manager.search(
-                    query.question,
-                    k=SEARCH_K,
-                )
-            ]
-
-            logfire.info(
-                "Recherche terminée",
-                result_count=len(search_results),
-                scores=[result.score for result in search_results],
-            )
-
-    except Exception as e:
-        logging.exception("Erreur pendant la recherche FAISS")
-        search_results = []
-
-    # try:
-    #     logging.info(f"Recherche de contexte pour la question: '{query.question}' avec k={SEARCH_K}")
-        
-    #     search_results = [
-    #         SearchResult(**results)
-    #         for results in vector_store_manager.search(query.question, k=SEARCH_K)
-    #     ] 
-    #     logging.info(f"{len(search_results)} chunks trouvés dans le Vector Store.")
-    # except Exception as e:
-    #     st.error(f"Une erreur est survenue lors de la recherche d'informations pertinentes: {e}")
-    #     logging.exception(f"Erreur pendant vector_store_manager.search pour la query: {query.question}")
-    #     search_results = [] # On continue sans contexte si la recherche échoue
-
-    # 4. Formater le contexte pour le prompt LLM
-    context_str = "\n\n---\n\n".join(
-        f"Source: {res.metadata.get('source', 'Inconnue')}"
-        f"Score: {res.score:.1f}%)\n"
-        f"Contenu: {res.text}"
-    for res in search_results)
-
-    if not search_results:
-        context_str = "Aucune information pertinente trouvée dans la base de connaissances pour cette question."
-        logging.warning(f"Aucun contexte trouvé pour la query: {query.question}")
-
-    # === Fin de la logique RAG ===
-
-
-    # 6. Afficher indicateur + Générer la réponse de l'assistant via LLM
     with st.chat_message("assistant"):
         message_placeholder = st.empty()
-        message_placeholder.text("...") # Indicateur simple
+        message_placeholder.markdown("Recherche en cours...")
 
-        # Génération de la réponse de l'assistant en utilisant le prompt formaté
-        rag_reponse = generer_reponse(
-            question=query.question,
-            context_str=context_str
-        )
+        with st.spinner("Analyse de la question..."):
+            answer = traiter_question_avec_tools(query.question)
 
-        # Affichage de la réponse complète
-        message_placeholder.write(rag_reponse.answer)
+        message_placeholder.write(answer)
 
-    # 7. Ajouter la réponse de l'assistant à l'historique (pour affichage UI)
-    st.session_state.messages.append({"role": "assistant", "content": rag_reponse.answer})
+    # Ajouter la réponse à l'historique Streamlit
+    st.session_state.messages.append(
+        {"role": "assistant", "content": answer}
+    )
+
 
 # Petit pied de page optionnel
 st.markdown("---")
