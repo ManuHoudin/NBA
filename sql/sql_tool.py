@@ -10,14 +10,56 @@ from langchain_classic.chains import create_sql_query_chain
 # Chemin de la base SQLite
 DB_PATH = Path(__file__).resolve().parent / "nba.db"
 
+# Nettoyage de la requête SQL générée par le modèle.
+def clean_sql_query(raw_query: str) -> str:
+    """Nettoie la sortie du modèle et extrait une requête SQL."""
+
+    query = raw_query.strip()
+
+    # Retirer les balises Markdown éventuelles
+    query = re.sub(
+        r"^```(?:sql)?\s*|\s*```$",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # Retirer le préfixe utilisé par certains modèles
+    query = re.sub(
+        r"^SQLQuery:\s*",
+        "",
+        query,
+        flags=re.IGNORECASE,
+    ).strip()
+
+    # Extraire la requête si un préambule précède le SQL
+    match = re.search(
+        r"\b(SELECT|WITH)\b[\s\S]*",
+        query,
+        flags=re.IGNORECASE,
+    )
+
+    if not match:
+        raise ValueError(
+            f"Aucune requête SELECT détectée : {raw_query!r}"
+        )
+
+    query = match.group(0).strip()
+
+    # Retirer un éventuel point-virgule final
+    query = query.removesuffix(";").strip()
+
+    # Refuser plusieurs instructions SQL
+    if ";" in query:
+        raise ValueError("Plusieurs instructions SQL sont interdites.")
+
+    return query
 
 def create_sql_tool(llm, db_path=DB_PATH):
     """
         Crée un outil qui :
     1. génère une requête SQL avec LangChain ;
     2. vérifie qu'il s'agit d'une requête de lecture ;
-    3. exécute la requête en lecture seule ;
-    4. retourne la requête et son résultat.
 
     Un seul appel au LLM est effectué par question.
     """
@@ -42,7 +84,12 @@ def create_sql_tool(llm, db_path=DB_PATH):
     )
 
     def ask_database(question: str) -> dict:
-        """Interroge la base avec un seul appel au LLM."""
+        """Interroge la base avec un seul appel au LLM :
+            1. envoie la question au llm
+            2. appelle la fonction clean_sql_query pour nettoyer la requête SQL générée par le modèle
+            3. exécute la requête en lecture seule ;
+            4. retourne la requête et son résultat.
+        """
 
         try:
             raw_query = query_chain.invoke({
@@ -50,44 +97,7 @@ def create_sql_tool(llm, db_path=DB_PATH):
             })
 
             # Nettoyer la réponse.
-            query = raw_query.strip()
-
-            query = re.sub(
-                r"^```(?:sql)?\s*|\s*```$",
-                "",
-                query,
-                flags=re.IGNORECASE,
-            ).strip()
-
-            query = re.sub(
-                r"^SQLQuery:\s*",
-                "",
-                query,
-                flags=re.IGNORECASE,
-            ).strip()
-
-            # Si le modèle ajoute un préambule ou du texte, extraire le code SQL.
-            match = re.search(
-                r"\b(SELECT|WITH)\b[\s\S]*",
-                query,
-                flags=re.IGNORECASE,
-            )
-
-            if not match:
-                raise ValueError(
-                    f"Aucune requête SELECT détectée : {raw_query!r}"
-                )
-
-            query = match.group(0).strip()
-
-            # Autoriser un point-virgule final, mais pas plusieurs
-            # instructions SQL.
-            query = query.rstrip().removesuffix(";").strip()
-
-            if ";" in query:
-                raise ValueError(
-                    "Plusieurs instructions SQL sont interdites."
-                )
+            query = clean_sql_query(raw_query)
 
             # Exécuter la requête avec SQLite en lecture seule.
             # Le préfixe file: et mode=ro empêchent les écritures.
