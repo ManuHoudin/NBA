@@ -1,4 +1,3 @@
-# MistralChat.py (version RAG)
 import streamlit as st
 import logging
 
@@ -10,6 +9,7 @@ from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
 
 from dotenv import load_dotenv
+from sql.sql_tool import create_sql_tool
 
 # --- Importations depuis vos modules ---
 try:
@@ -39,7 +39,7 @@ from utils.format_control import UserQuery, RAGResponse, SearchResult
 # Note: Streamlit peut avoir sa propre gestion de logs. Configurer ici est une bonne pratique.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s - %(message)s')
 
-# --- Configuration de l'API Mistral ---
+# --- Configuration de l'API Mistral / Qwen3.8 ---
 api_key = DASHSCOPE_API_KEY
 model = MODEL_NAME
 
@@ -67,6 +67,9 @@ rag_agent = Agent(
         "Si le contexte ne permet pas de répondre, indique-le clairement."
     ),
 )
+
+# --- Configuration SQL ---
+ask_database = create_sql_tool(qwen_model)
 
 # try:
 #     #client = MistralClient(api_key=api_key)

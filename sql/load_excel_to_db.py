@@ -26,7 +26,7 @@ logger = logging.getLogger(__name__)
 
 
 # --------------------------------------------------
-# Correspondance Excel -> modèle Python / SQL
+# Renommage des données
 # --------------------------------------------------
 
 COLUMN_MAPPING = {
@@ -79,7 +79,7 @@ COLUMN_MAPPING = {
 
 
 # --------------------------------------------------
-# Modèle Pydantic : une ligne Excel = un joueur
+# Contrôle de format Pydantic
 # --------------------------------------------------
 
 class NBAPlayerRow(BaseModel):
@@ -206,7 +206,7 @@ def load_and_validate_excel() -> list[NBAPlayerRow]:
 
         # on contrôle les pourcentages avant la validation Pydantic
         PERCENTAGE_COLUMNS = ["field_goal_percentage", "three_points_percentage", "free_throw_percentage", "assists_percentage",
-        "net_rating", "effective_field_goal_percentage", "true_shooting_percentage", "usage_rate_percentage"]
+     "effective_field_goal_percentage", "true_shooting_percentage", "usage_rate_percentage"]
 
         for col in PERCENTAGE_COLUMNS:
             value = data.get(col)
@@ -349,7 +349,7 @@ def insert_players(
             ),
         )
 
-        # SQLite génère le player_id : aucune génération manuelle nécessaire.
+        # Génération auto du player_id
         player_id = cursor.lastrowid
 
         stat_values = [data[column] for column in STAT_COLUMNS]
@@ -370,7 +370,7 @@ def main() -> None:
     # 1. Valider toutes les lignes AVANT l'insertion.
     players = load_and_validate_excel()
 
-    # 2. Créer les tables et insérer toutes les données atomiquement.
+    # 2. Créer les tables et insérer toutes les données.
     with sqlite3.connect(DB_FILE) as conn:
         conn.execute("PRAGMA foreign_keys = ON")
 

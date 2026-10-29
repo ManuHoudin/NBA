@@ -3,7 +3,7 @@ Une base de donnée a été créée pour mieux intégrer les données numérique
 
 ## Structure de la base
 La base nba.db contient les tables players, teams et stats
-Voir le MCD dans `schema.md`
+Voir le MCD dans `schema.md`. Ne pas oublier de mettre à jour ce schéma en cas de modification dans la base.
 
 La clé étrangère permet de s'assurer qu'un enregistrement de stats correspond bien à un player de la table players
 Elle permet également, pour un player_id, de supprimer la ligne concernée dans les 2 tables
