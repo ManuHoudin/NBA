@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+from pathlib import Path
+import sys
 
 from dotenv import load_dotenv
 
@@ -12,7 +14,13 @@ from langchain_openai import ChatOpenAI
 
 from mistralai.client import Mistral
 
-from tests.evaluation.RAGasEvaluator import RAGasEvaluator
+from RAGasEvaluator import RAGasEvaluator
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+EVAL_DIR = PROJECT_ROOT / "tests/evaluation"
+
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(EVAL_DIR))
 
 from utils.config import (
     DASHSCOPE_API_KEY,
@@ -141,8 +149,6 @@ async def evaluate_all():
     # Evaluateur Ragas
     # ---------------------------------
 
-    # NOUVEAU : On ouvre proprement le client Mistral en mode Asynchrone
-    # pour que l'évaluateur Ragas et vos embeddings puissent l'utiliser sans planter
     async with Mistral(api_key=MISTRAL_API_KEY) as mistral_client:
 
         evaluator = RAGasEvaluator(
@@ -162,6 +168,7 @@ async def evaluate_all():
         for i, item in enumerate(test_data):
 
             question = item["question"]
+            reference = item["reference"]
 
             logging.info(
                 "[%d/%d] %s",
@@ -172,7 +179,7 @@ async def evaluate_all():
 
             result = await evaluator.evaluate_case(
                 question=question,
-                reference=item["reference"],
+                reference=reference,
             )
 
             results.append(result)
@@ -187,10 +194,20 @@ async def evaluate_all():
                 result["faithfulness"],
             )
 
-            print(
-                "Response Relevancy :",
-                result["response_relevancy"],
-            )
+            # print(
+            #     "Response Relevancy :",
+            #     result["response_relevancy"],
+            # )
+
+            # print(
+            #     "Context Precision :",
+            #     result["context_precision"],
+            # )
+
+            # print(
+            #     "Context Recall :",
+            #     result["context_recall"],
+            # )
 
         return results
 

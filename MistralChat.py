@@ -1,6 +1,8 @@
 import streamlit as st
 import logging
 import json
+import re
+
 
 from langchain_openai import ChatOpenAI
 from langchain_core.tools import tool
@@ -9,6 +11,7 @@ from pydantic_ai import Agent
 from pydantic_ai.models.openai import OpenAIChatModel
 from pydantic_ai.providers.openai import OpenAIProvider
 from pydantic_ai.settings import ModelSettings
+from typing import Any
 
 from dotenv import load_dotenv
 from sql.sql_tool import create_sql_tool
@@ -124,20 +127,6 @@ def get_vector_store_manager():
 
 vector_store_manager = get_vector_store_manager()
 
-# --- Prompt Système pour RAG ---
-# Adaptez ce prompt selon vos besoins
-SYSTEM_PROMPT = f"""Tu es 'NBA Analyst AI', un assistant expert sur la ligue de basketball NBA.
-Ta mission est de répondre aux questions des fans en animant le débat.
-
----
-{{context_str}}
----
-
-QUESTION DU FAN:
-{{question}}
-
-RÉPONSE DE L'ANALYSTE NBA:"""
-
 
 # --- Initialisation de l'historique de conversation ---
 if "messages" not in st.session_state:
@@ -179,6 +168,9 @@ def build_nba_tools(ask_database, vector_store_manager):
         if vector_store_manager is None:
             return "Erreur : la base documentaire FAISS est indisponible."
 
+        print("\n--- FAISS CALLED ---")
+        print("Query:", question)
+
         try:
             search_results = [
                 SearchResult(**result)
@@ -212,7 +204,7 @@ nba_tools = build_nba_tools(
 
 nba_tools_by_name = {tool.name: tool for tool in nba_tools}
 
-# Le modèle sait désormais appeler les outils déclarés.
+# Le modèle appelle les outils.
 qwen_with_tools = qwen_langchain.bind_tools(
     nba_tools,
     parallel_tool_calls=False,
@@ -222,18 +214,40 @@ qwen_with_tools = qwen_langchain.bind_tools(
 # --- Routage et synthèse avec LangChain ---
 
 ROUTER_SYSTEM_PROMPT = """
-Tu es NBA Analyst AI, un assistant expert sur la NBA.
+You are a routing agent for an NBA statistics assistant.
 
-Pour répondre à chaque question, choisis exactement un outil :
+You have access to two tools:
 
 - nba_sql_tool :
-  pour les statistiques chiffrées, classements, moyennes,
-  totaux, comparaisons de joueurs et statistiques d'équipes.
+  Use this tool for structured NBA statistics stored in the database.
+   Examples:
+   - Average points per game of a player
+   - Number of rebounds or assists
+   - Player statistics
+   - Team statistics
+   - Season statistics
+   - Statistical comparisons
 
 - faiss_search_tool :
-  pour les questions explicatives, qualitatives, historiques
-  ou nécessitant des informations issues de la base documentaire.
+  Use this tool for unstructured information.
+   Examples:
+   - Player biographies
+   - Match reports
+   - News and articles
+   - Tactical analysis
+   - Explanations and qualitative information
 
+Routing rules:
+
+- If the answer can be obtained from a structured
+  database column, ALWAYS use SQL_DATABASE.
+- Do not use FAISS to retrieve numerical statistics
+  already available in SQL.
+- Do not call FAISS as a fallback before trying SQL
+  for structured statistical questions.
+- Use both tools only when the question genuinely
+  requires both structured and unstructured information.
+  
 Appelle l'outil approprié avant de répondre.
 Ne réponds pas à partir de tes seules connaissances si un outil
 peut fournir les informations nécessaires.
@@ -245,9 +259,100 @@ Si l'outil renvoie une erreur ou ne trouve pas l'information,
 explique-le explicitement.
 """
 
+# Cette fonction permet un 1er aiguillage vers l'outil SQL si la question est de nature statistique.
+SQL_KEYWORDS = [
+    "moyenne",
+    "total",
+    "nombre de",
+    "combien de",
+    "points par match",
+    "rebonds par match",
+    "passes par match",
+    "statistiques",
+    "statistique",
+    "pourcentage",
+    "taux de réussite",
+    "classement",
+    "meilleur scoreur",
+    "meilleur marqueur",
+]
 
-def traiter_question_avec_tools(question: str) -> str:
+def is_sql_question(question: str) -> bool:
+    question = question.lower()
+
+    return any(
+        re.search(r"\b" + re.escape(keyword) + r"\b", question)
+        for keyword in SQL_KEYWORDS
+    )
+
+# Cette fonction détermine si la question est mixte (SQL + qualitatif) en vérifiant la présence de mots-clés qualitatifs.
+MIXED_KEYWORDS = [
+    "fan",
+    "fans",
+    "supporters",
+    "avis",
+    "critiques",
+    "commentaires",
+    "opinion",
+    "réactions",
+    "ressenti",
+]
+
+def is_mixed_question(question: str) -> bool:
+    question = question.lower()
+
+    has_sql = is_sql_question(question)
+    has_qualitative = any(
+        keyword in question
+        for keyword in MIXED_KEYWORDS
+    )
+
+def traiter_question_avec_tools(question: str) -> dict[str, Any]:
     """Choisit un outil, l'exécute, puis synthétise sa réponse."""
+
+    print("!!! TRAITER_QUESTION_AVEC_TOOLS EXECUTED !!!")
+    # Routage déterministe des questions chiffrées
+    if is_sql_question(question):
+
+        print("\n--- DIRECT SQL ROUTING ---")
+        print("Question:", question)
+
+        sql_tool = nba_tools_by_name["nba_sql_tool"]
+
+        result = sql_tool.invoke({
+            "question": question
+        })
+
+        print("SQL RESULT:", result)
+
+        try:
+            sql_data = json.loads(result) if isinstance(result, str) else result
+
+            rows = sql_data.get("result", [])
+
+            contexts = [
+                json.dumps(row, ensure_ascii=False)
+                for row in rows
+            ]
+
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            contexts = [str(result)]
+
+        # Transmission du résultat au modèle pour formulation
+        final_message = qwen_langchain.invoke([
+            SystemMessage(
+                content="Réponds à la question uniquement à partir "
+                        "des résultats SQL fournis. N'invente aucune valeur."
+            ),
+            HumanMessage(
+                content=f"Question : {question}\nRésultat SQL : {result}"
+            )
+        ])
+
+        return {"answer": final_message.content, "contexts": [
+                f"Résultat SQL : {result}"],
+            "source": "sql"
+        }
 
     messages = [
         SystemMessage(content=ROUTER_SYSTEM_PROMPT),
@@ -259,11 +364,21 @@ def traiter_question_avec_tools(question: str) -> str:
         ai_message = qwen_with_tools.invoke(messages)
         messages.append(ai_message)
 
+        print("\n--- ROUTER DECISION ---")
+        print("Tool calls:", ai_message.tool_calls)
+        print("Content:", ai_message.content)
+
+        for tool_call in ai_message.tool_calls:
+            print("Tool name:", tool_call["name"])
+            print("Tool arguments:", tool_call["args"])  
+
         # Si aucun outil n'est appelé, retourner la réponse du modèle.
         if not ai_message.tool_calls:
-            return ai_message.content or (
-                "Je n'ai pas pu déterminer comment traiter la question."
-            )
+            return {
+                "answer": ai_message.content or "Je n'ai pas pu répondre.",
+                "contexts": [],
+                "source": "none"
+            }
 
         # Exécuter les outils demandés.
         # Le prompt demande un seul outil ; cette boucle gère aussi
@@ -289,13 +404,26 @@ def traiter_question_avec_tools(question: str) -> str:
         final_message = qwen_langchain.invoke(messages)
 
         if isinstance(final_message.content, str):
-            return final_message.content
+            return {
+            "answer": final_message.content,
+            "contexts": [str(tool_result)],
+            "source": "sql"
+        }
 
-        return str(final_message.content)
+        return {
+            "answer": final_message.content,
+            "contexts": [str(tool_result)],
+            "source": "faiss"
+        }
+
 
     except Exception as exc:
         logging.exception("Erreur dans le routage LangChain")
-        return f"Une erreur technique est survenue : {exc}"
+        return {
+            "answer": f"Erreur technique : {exc}",
+            "contexts": [],
+            "source": "error"
+        }
 
 
 # --- Fonctions ---

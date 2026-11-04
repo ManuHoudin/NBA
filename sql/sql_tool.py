@@ -50,6 +50,11 @@ def clean_sql_query(raw_query: str) -> str:
     query = query.removesuffix(";").strip()
 
     # Refuser plusieurs instructions SQL
+    query = query.strip()
+
+    if ";" in query:
+        query = query.rstrip(";").strip()
+
     if ";" in query:
         raise ValueError("Plusieurs instructions SQL sont interdites.")
 
@@ -90,6 +95,9 @@ def create_sql_tool(llm, db_path=DB_PATH):
             3. exécute la requête en lecture seule ;
             4. retourne la requête et son résultat.
         """
+
+        print("\n--- SQL CALLED ---")
+        print("Question:", question)
 
         try:
             raw_query = query_chain.invoke({

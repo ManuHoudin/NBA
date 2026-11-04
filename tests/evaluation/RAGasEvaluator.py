@@ -6,9 +6,20 @@ from ragas.embeddings import BaseRagasEmbeddings
 from ragas.metrics import (
     Faithfulness,
     ResponseRelevancy,
+    ContextPrecision,
+    ContextRecall,
 )
 
 from mistralai.client import Mistral
+
+import asyncio
+from typing import Any
+import sys
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+sys.path.insert(0, str(PROJECT_ROOT))
+from MistralChat import traiter_question_avec_tools
 
 
 class MistralRagasEmbeddings(BaseRagasEmbeddings):
@@ -136,24 +147,25 @@ class RAGasEvaluator:
         self.answer_fn = answer_fn
 
         # Embeddings utilisés par ResponseRelevancy
-        self.ragas_embeddings = MistralRagasEmbeddings(
-            mistral_client
-        )
+        self.ragas_embeddings = MistralRagasEmbeddings(mistral_client)
 
         # Generation metrics
-        self.faithfulness = Faithfulness(
-            llm=llm
-        )
+        self.faithfulness = Faithfulness(llm=llm)
+      #  self.response_relevancy = ResponseRelevancy(llm=llm,embeddings=self.ragas_embeddings,)
 
-        self.response_relevancy = ResponseRelevancy(
-            llm=llm,
-            embeddings=self.ragas_embeddings,
-        )
+#        self.context_precision = ContextPrecision(llm=self.llm)
+ #       self.context_recall = ContextRecall(llm=self.llm)
+
+    async def answer_with_tools(self, question: str) -> dict[str, Any]:
+        return await asyncio.to_thread(
+            traiter_question_avec_tools,
+            question
+    )
 
     async def evaluate_case(
         self,
         question: str,
-        reference: list[str | int],
+        reference: str
     ) -> dict:
 
         print(">>> EVALUATE_CASE START")
@@ -162,35 +174,42 @@ class RAGasEvaluator:
         # Retrieval
         # ---------------------------------
 
-        search_results = self.vector_store.search(
-            question,
-            k=self.search_k,
-        )
+        # search_results = self.vector_store.search(
+        #     question,
+        #     k=self.search_k,
+        # )
 
-        contexts = [
-            result["text"]
-            for result in search_results
-        ]
+        # contexts = [
+        #     result["text"]
+        #     for result in search_results
+        # ]
 
         # ---------------------------------
         # Génération de la réponse
         # ---------------------------------
 
-        answer = await self.answer_fn(
+        result = await self.answer_with_tools(
             question,
-            contexts,
+            # contexts,
         )
 
-        print("Answer :", answer)
+        print("Answer :", result["answer"])
+        answer = result["answer"]
 
         # ---------------------------------
         # Sample pour les métriques
         # ---------------------------------
 
+        actual_contexts = result["contexts"]
+
+        print("Source :", result["source"])
+        print("Answer :", answer)
+        print("Contexts :", actual_contexts)
+
         sample_rag = SingleTurnSample(
             user_input=question,
             response=answer,
-            retrieved_contexts=contexts,
+            retrieved_contexts=actual_contexts,
         )
 
         # ---------------------------------
@@ -207,20 +226,50 @@ class RAGasEvaluator:
         # Response relevancy
         # ---------------------------------
 
-        response_relevancy = (
-            await self.response_relevancy.single_turn_ascore(
-                sample_rag
-            )
-        )
+        # response_relevancy = (
+        #     await self.response_relevancy.single_turn_ascore(
+        #         sample_rag
+        #     )
+        # )
 
-        print(
-            "Response Relevancy :",
-            response_relevancy,
-        )
+        # print(
+        #     "Response Relevancy :", response_relevancy,)
+
+        # ---------------------------------
+        # Context Precision
+        # ---------------------------------
+
+        # context_precision = (
+        #     await self.context_precision.single_turn_ascore(
+        #         sample_rag,
+        #     )
+        # )
+
+        # print(
+        #     "Context Precision :",
+        #     context_precision,
+        # )
+
+        # ---------------------------------
+        # Context Recall
+        # ---------------------------------
+
+        # context_recall = (
+        #     await self.context_recall.single_turn_ascore(
+        #         sample_rag
+        #     )
+        # )
+
+        # print(
+        #     "Context Recall :",
+        #     context_recall,
+        # )
 
         return {
             "question": question,
             "answer": answer,
             "faithfulness": faithfulness,
-            "response_relevancy": response_relevancy,
+        #    "response_relevancy": response_relevancy,
+        #    "context_precision": context_precision,
+        #    "context_recall": context_recall,
         }
