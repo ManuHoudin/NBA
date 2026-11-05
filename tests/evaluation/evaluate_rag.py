@@ -194,20 +194,20 @@ async def evaluate_all():
                 result["faithfulness"],
             )
 
-            # print(
-            #     "Response Relevancy :",
-            #     result["response_relevancy"],
-            # )
+            print(
+                "Response Relevancy :",
+                result["response_relevancy"],
+            )
 
-            # print(
-            #     "Context Precision :",
-            #     result["context_precision"],
-            # )
+            print(
+                "Context Precision :",
+                result["context_precision"],
+            )
 
-            # print(
-            #     "Context Recall :",
-            #     result["context_recall"],
-            # )
+            print(
+                "Context Recall :",
+                result["context_recall"],
+            )
 
         return results
 

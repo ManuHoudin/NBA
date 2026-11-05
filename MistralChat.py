@@ -261,20 +261,22 @@ explique-le explicitement.
 
 # Cette fonction permet un 1er aiguillage vers l'outil SQL si la question est de nature statistique.
 SQL_KEYWORDS = [
-    "moyenne",
-    "total",
-    "nombre de",
-    "combien de",
-    "points par match",
-    "rebonds par match",
+    # Statistiques générales
+    "statistique", "statistiques",
+    "performance", "performances",
+    "résultat", "résultats",
+
+    # Mesures quantitatives
+    "moyenne", "total", "nombre de",
+    "points", "rebonds", "passes",
+    "points par match", "rebonds par match",
     "passes par match",
-    "statistiques",
-    "statistique",
-    "pourcentage",
-    "taux de réussite",
-    "classement",
-    "meilleur scoreur",
-    "meilleur marqueur",
+    "pourcentage", "taux de réussite",
+
+    # Comparaisons et classements
+    "comparer", "compare",
+    "comparaison", "supérieur", "inférieur",
+    "classement", "meilleur marqueur",
 ]
 
 def is_sql_question(question: str) -> bool:
@@ -287,15 +289,23 @@ def is_sql_question(question: str) -> bool:
 
 # Cette fonction détermine si la question est mixte (SQL + qualitatif) en vérifiant la présence de mots-clés qualitatifs.
 MIXED_KEYWORDS = [
-    "fan",
-    "fans",
-    "supporters",
-    "avis",
-    "critiques",
-    "commentaires",
-    "opinion",
-    "réactions",
+    # Communauté
+    "fan", "fans", "supporter", "supporters",
+
+    # Opinions
+    "avis", "opinion", "opinions",
+    "critique", "critiques",
+    "commentaire", "commentaires",
+    "réaction", "réactions",
     "ressenti",
+
+    # Sentiment
+    "positif", "positive", "positifs", "positives",
+    "négatif", "négative", "négatifs", "négatives",
+    "satisfaction", "mécontentement",
+
+    # Documents et contenus
+    "documents", "articles", "discussions",
 ]
 
 def is_mixed_question(question: str) -> bool:
@@ -307,12 +317,104 @@ def is_mixed_question(question: str) -> bool:
         for keyword in MIXED_KEYWORDS
     )
 
+    return has_sql and has_qualitative
+
 def traiter_question_avec_tools(question: str) -> dict[str, Any]:
-    """Choisit un outil, l'exécute, puis synthétise sa réponse."""
+    """Route les questions vers SQL, FAISS ou les deux."""
 
     print("!!! TRAITER_QUESTION_AVEC_TOOLS EXECUTED !!!")
-    # Routage déterministe des questions chiffrées
-    if is_sql_question(question):
+    print("SQL QUESTION:", is_sql_question(question))
+    print("MIXED QUESTION:", is_mixed_question(question))
+
+    # --------------------------------------------------
+    # CAS 1 : QUESTION MIXTE SQL + FAISS
+    # --------------------------------------------------
+    if is_mixed_question(question):
+
+        print("\n--- MIXED SQL + FAISS ROUTING ---")
+        print("Question:", question)
+
+        # Appel SQL
+        sql_tool = nba_tools_by_name["nba_sql_tool"]
+
+        sql_result = sql_tool.invoke({
+            "question": question
+        })
+
+        print("SQL RESULT:", sql_result)
+
+        # Appel FAISS avec une recherche ciblée sur les avis des fans
+        faiss_tool = nba_tools_by_name["faiss_search_tool"]
+
+        faiss_result = faiss_tool.invoke({
+            "question": (
+                f"Avis, critiques, commentaires et réactions des fans "
+                f"concernant le sujet de cette question : {question}"
+            )
+        })
+
+        print("FAISS RESULT:", faiss_result)
+
+        # Préparation des contextes pour Ragas
+        try:
+            sql_data = (
+                json.loads(sql_result)
+                if isinstance(sql_result, str)
+                else sql_result
+            )
+
+            sql_rows = sql_data.get("result", [])
+
+            sql_contexts = [
+                "Résultat SQL : " + json.dumps(
+                    row,
+                    ensure_ascii=False
+                )
+                for row in sql_rows
+            ]
+
+        except (json.JSONDecodeError, AttributeError, TypeError):
+            sql_contexts = [f"Résultat SQL : {sql_result}"]
+
+        contexts = sql_contexts + [
+            f"Résultat documentaire FAISS : {faiss_result}"
+        ]
+
+        # Synthèse croisant les deux sources
+        final_message = qwen_langchain.invoke([
+            SystemMessage(
+                content=(
+                    "Tu es un analyste NBA. "
+                    "Tu dois répondre en croisant les statistiques SQL "
+                    "et les informations documentaires FAISS. "
+                    "Distingue les faits statistiques des opinions des fans. "
+                    "Compare les deux sources et formule une conclusion "
+                    "argumentée. "
+                    "N'invente aucune donnée. "
+                    "Si une information manque dans l'une des sources, "
+                    "signale-le explicitement. "
+                    "Réponds en français."
+                )
+            ),
+            HumanMessage(
+                content=(
+                    f"Question : {question}\n\n"
+                    f"Résultats SQL : {sql_result}\n\n"
+                    f"Informations documentaires FAISS : {faiss_result}"
+                )
+            )
+        ])
+
+        return {
+            "answer": final_message.content,
+            "contexts": contexts,
+            "source": "sql_faiss"
+        }
+
+    # --------------------------------------------------
+    # CAS 2 : QUESTION SQL SIMPLE
+    # --------------------------------------------------
+    elif is_sql_question(question):
 
         print("\n--- DIRECT SQL ROUTING ---")
         print("Question:", question)
@@ -326,7 +428,11 @@ def traiter_question_avec_tools(question: str) -> dict[str, Any]:
         print("SQL RESULT:", result)
 
         try:
-            sql_data = json.loads(result) if isinstance(result, str) else result
+            sql_data = (
+                json.loads(result)
+                if isinstance(result, str)
+                else result
+            )
 
             rows = sql_data.get("result", [])
 
@@ -338,93 +444,98 @@ def traiter_question_avec_tools(question: str) -> dict[str, Any]:
         except (json.JSONDecodeError, AttributeError, TypeError):
             contexts = [str(result)]
 
-        # Transmission du résultat au modèle pour formulation
         final_message = qwen_langchain.invoke([
             SystemMessage(
-                content="Réponds à la question uniquement à partir "
-                        "des résultats SQL fournis. N'invente aucune valeur."
+                content=(
+                    "Réponds à la question uniquement à partir "
+                    "des résultats SQL fournis. "
+                    "N'invente aucune valeur. "
+                    "Réponds en français."
+                )
             ),
             HumanMessage(
                 content=f"Question : {question}\nRésultat SQL : {result}"
             )
         ])
 
-        return {"answer": final_message.content, "contexts": [
-                f"Résultat SQL : {result}"],
+        return {
+            "answer": final_message.content,
+            "contexts": contexts,
             "source": "sql"
         }
 
-    messages = [
-        SystemMessage(content=ROUTER_SYSTEM_PROMPT),
-        HumanMessage(content=question),
-    ]
+    # --------------------------------------------------
+    # CAS 3 : QUESTION DOCUMENTAIRE OU AUTRE
+    # --------------------------------------------------
+    else:
+        messages = [
+            SystemMessage(content=ROUTER_SYSTEM_PROMPT),
+            HumanMessage(content=question),
+        ]
 
-    try:
-        # Appel 1 : Qwen choisit un outil.
-        ai_message = qwen_with_tools.invoke(messages)
-        messages.append(ai_message)
+        try:
+            ai_message = qwen_with_tools.invoke(messages)
+            messages.append(ai_message)
 
-        print("\n--- ROUTER DECISION ---")
-        print("Tool calls:", ai_message.tool_calls)
-        print("Content:", ai_message.content)
+            print("\n--- ROUTER DECISION ---")
+            print("Tool calls:", ai_message.tool_calls)
+            print("Content:", ai_message.content)
 
-        for tool_call in ai_message.tool_calls:
-            print("Tool name:", tool_call["name"])
-            print("Tool arguments:", tool_call["args"])  
+            if not ai_message.tool_calls:
+                return {
+                    "answer": ai_message.content or "Je n'ai pas pu répondre.",
+                    "contexts": [],
+                    "source": "none"
+                }
 
-        # Si aucun outil n'est appelé, retourner la réponse du modèle.
-        if not ai_message.tool_calls:
+            tool_contexts = []
+            sources = []
+
+            for tool_call in ai_message.tool_calls:
+
+                selected_tool = nba_tools_by_name.get(tool_call["name"])
+
+                if selected_tool is None:
+                    tool_result = f"Erreur : outil inconnu {tool_call['name']}."
+                else:
+                    tool_result = selected_tool.invoke(tool_call["args"])
+
+                messages.append(
+                    ToolMessage(
+                        content=str(tool_result),
+                        tool_call_id=tool_call["id"],
+                    )
+                )
+
+                tool_contexts.append(str(tool_result))
+                sources.append(tool_call["name"])
+
+            final_message = qwen_langchain.invoke(messages)
+
+            if "nba_sql_tool" in sources and "faiss_search_tool" in sources:
+                source = "sql_faiss"
+            elif "nba_sql_tool" in sources:
+                source = "sql"
+            elif "faiss_search_tool" in sources:
+                source = "faiss"
+            else:
+                source = "none"
+
             return {
-                "answer": ai_message.content or "Je n'ai pas pu répondre.",
-                "contexts": [],
-                "source": "none"
+                "answer": final_message.content,
+                "contexts": tool_contexts,
+                "source": source
             }
 
-        # Exécuter les outils demandés.
-        # Le prompt demande un seul outil ; cette boucle gère aussi
-        # correctement le cas où le modèle en demande plusieurs.
-        for tool_call in ai_message.tool_calls:
-            selected_tool = nba_tools_by_name.get(tool_call["name"])
+        except Exception as exc:
+            logging.exception("Erreur dans le routage LangChain")
 
-            if selected_tool is None:
-                tool_result = (
-                    f"Erreur : outil inconnu {tool_call['name']}."
-                )
-            else:
-                tool_result = selected_tool.invoke(tool_call["args"])
-
-            messages.append(
-                ToolMessage(
-                    content=str(tool_result),
-                    tool_call_id=tool_call["id"],
-                )
-            )
-
-        # Appel final : Qwen synthétise les résultats des outils.
-        final_message = qwen_langchain.invoke(messages)
-
-        if isinstance(final_message.content, str):
             return {
-            "answer": final_message.content,
-            "contexts": [str(tool_result)],
-            "source": "sql"
-        }
+                "answer": f"Erreur technique : {exc}",
+                "contexts": [],
+                "source": "error"
 
-        return {
-            "answer": final_message.content,
-            "contexts": [str(tool_result)],
-            "source": "faiss"
-        }
-
-
-    except Exception as exc:
-        logging.exception("Erreur dans le routage LangChain")
-        return {
-            "answer": f"Erreur technique : {exc}",
-            "contexts": [],
-            "source": "error"
-        }
-
+            }
 
 # --- Fonctions ---
 

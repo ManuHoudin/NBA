@@ -29,3 +29,4 @@ Amélioration des résultats:
 - nettoyage des résultats récupérés
 - bien récupérer toutes les réponses retournées notamment lors de comparaisons
 - on ne transmet pas le contexte tel que il faut en extraire les éléments pour augmenter Faithfulness
+- utiliser une liste de mots clés enrichies pour le filtrage entre Mixed_tool et SQL_tool

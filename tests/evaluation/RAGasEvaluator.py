@@ -151,10 +151,10 @@ class RAGasEvaluator:
 
         # Generation metrics
         self.faithfulness = Faithfulness(llm=llm)
-      #  self.response_relevancy = ResponseRelevancy(llm=llm,embeddings=self.ragas_embeddings,)
+        self.response_relevancy = ResponseRelevancy(llm=llm,embeddings=self.ragas_embeddings,)
 
-#        self.context_precision = ContextPrecision(llm=self.llm)
- #       self.context_recall = ContextRecall(llm=self.llm)
+        self.context_precision = ContextPrecision(llm=self.llm)
+        self.context_recall = ContextRecall(llm=self.llm)
 
     async def answer_with_tools(self, question: str) -> dict[str, Any]:
         return await asyncio.to_thread(
@@ -209,6 +209,7 @@ class RAGasEvaluator:
         sample_rag = SingleTurnSample(
             user_input=question,
             response=answer,
+            reference=reference,
             retrieved_contexts=actual_contexts,
         )
 
@@ -226,50 +227,50 @@ class RAGasEvaluator:
         # Response relevancy
         # ---------------------------------
 
-        # response_relevancy = (
-        #     await self.response_relevancy.single_turn_ascore(
-        #         sample_rag
-        #     )
-        # )
+        response_relevancy = (
+            await self.response_relevancy.single_turn_ascore(
+                sample_rag
+            )
+        )
 
-        # print(
-        #     "Response Relevancy :", response_relevancy,)
+        print(
+            "Response Relevancy :", response_relevancy,)
 
         # ---------------------------------
         # Context Precision
         # ---------------------------------
 
-        # context_precision = (
-        #     await self.context_precision.single_turn_ascore(
-        #         sample_rag,
-        #     )
-        # )
+        context_precision = (
+            await self.context_precision.single_turn_ascore(
+                sample_rag,
+            )
+        )
 
-        # print(
-        #     "Context Precision :",
-        #     context_precision,
-        # )
+        print(
+            "Context Precision :",
+            context_precision,
+        )
 
         # ---------------------------------
         # Context Recall
         # ---------------------------------
 
-        # context_recall = (
-        #     await self.context_recall.single_turn_ascore(
-        #         sample_rag
-        #     )
-        # )
+        context_recall = (
+            await self.context_recall.single_turn_ascore(
+                sample_rag
+            )
+        )
 
-        # print(
-        #     "Context Recall :",
-        #     context_recall,
-        # )
+        print(
+            "Context Recall :",
+            context_recall,
+        )
 
         return {
             "question": question,
             "answer": answer,
             "faithfulness": faithfulness,
-        #    "response_relevancy": response_relevancy,
-        #    "context_precision": context_precision,
-        #    "context_recall": context_recall,
+            "response_relevancy": response_relevancy,
+            "context_precision": context_precision,
+            "context_recall": context_recall,
         }

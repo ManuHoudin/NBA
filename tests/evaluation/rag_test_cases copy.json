@@ -32,7 +32,7 @@
         "reference": "Certains jugent Reggie Miller surcoté parce que son volume de scoring et son taux d’utilisation étaient relativement faibles pour une première option, qu’il créait moins facilement son tir balle en main et que son efficacité statistique ne suffit pas, selon eux, à le placer au niveau des plus grands scoreurs."
     },
     {
-        "question": "Les statistiques des Orlando Magic vont-elles dans le sens des critiques exprimées par les fans ?",
+        "question": "Les performances offensives des Orlando Magic sont-elles cohérentes avec les avis positifs exprimés par les fans ? Compare leur nombre total de points à la moyenne des équipes NBA et confronte ce résultat aux avis présents dans les documents.",
         "reference": "Les statistiques ne vont pas dans le même sens que les bonnes critiques des fans car le nombre de points total de l'équipe des Orlando Magic est inférieur à la moyenne des équipes."
     },
     {
