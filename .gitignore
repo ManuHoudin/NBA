@@ -43,6 +43,7 @@ logs/
 
 # Fichiers de données
 inputs/
+*.xlsx
 
 # Jupyter Notebook
 .ipynb_checkpoints

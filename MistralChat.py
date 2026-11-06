@@ -1,5 +1,6 @@
 import streamlit as st
 import logging
+import logfire
 import json
 import re
 
@@ -27,10 +28,9 @@ except ImportError as e:
     st.error(f"Erreur d'importation: {e}. Vérifiez la structure de vos dossiers et les fichiers dans 'utils'.")
     st.stop()
 
-# Configuration de l'observabilité en premier
-import logfire
-
+# Configure l'observabilité
 logfire.configure()
+
 # Trace les exécutions de l'agent Pydantic AI
 logfire.instrument_pydantic_ai()
 
@@ -356,6 +356,7 @@ def traiter_question_avec_tools(question: str) -> dict[str, Any]:
         print("FAISS RESULT:", faiss_result)
 
         # Préparation des contextes pour Ragas
+        # le résultat est converti en dictionnaire
         try:
             sql_data = (
                 json.loads(sql_result)
