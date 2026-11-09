@@ -2,17 +2,19 @@ import streamlit as st
 import logging
 import logfire
 import json
+import time
 import re
 
 
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
 from langchain_core.tools import tool
-from langchain_core.messages import SystemMessage, HumanMessage, ToolMessage
+from langchain_core.messages import SystemMessage, HumanMessage
 from pydantic_ai import Agent
-from pydantic_ai.models.openai import OpenAIChatModel
-from pydantic_ai.providers.openai import OpenAIProvider
+from pydantic_ai.models.groq import GroqModel, GroqModelSettings
+from pydantic_ai.providers.groq import GroqProvider
 from pydantic_ai.settings import ModelSettings
-from typing import Any
+from typing import Any, Literal
+from pydantic import BaseModel, Field
 
 from dotenv import load_dotenv
 from sql.sql_tool import create_sql_tool
@@ -21,7 +23,7 @@ from sql.sql_tool import create_sql_tool
 try:
     from utils.config import (
         MISTRAL_API_KEY, MODEL_NAME, SEARCH_K,
-        APP_TITLE, NAME, DASHSCOPE_API_KEY
+        APP_TITLE, NAME, GROQ_API_KEY
     )
     from utils.vector_store import VectorStoreManager
 except ImportError as e:
@@ -44,28 +46,34 @@ from utils.format_control import UserQuery, RAGResponse, SearchResult
 # Note: Streamlit peut avoir sa propre gestion de logs. Configurer ici est une bonne pratique.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s - %(message)s')
 
-# --- Configuration de l'API Mistral / Qwen3.8 ---
-api_key = DASHSCOPE_API_KEY
+# --- Configuration de l'API Mistral / GPT ---
+api_key = GROQ_API_KEY
 model = MODEL_NAME
 
-# --- Initialisation du modèle Qwen3.8-flash via Pydantic AI ---
-qwen_model = OpenAIChatModel(
-    model_name=model,
-    provider=OpenAIProvider(
-        base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-        api_key=api_key,
-    ),
-)
+# --- Initialisation du modèle GPT ---
+groq_llm = ChatGroq(
+    model=model,
+    temperature=0.2,
+    api_key=api_key
+    )
+
 
 if not api_key:
-    st.error("Erreur : Clé API Qwen non trouvée (DASHSCOPE_API_KEY). Veuillez la définir dans le fichier .env.")
+    st.error("Erreur : Clé API GPT non trouvée (GROQ_API_KEY). Veuillez la définir dans le fichier .env.")
     st.stop()
+
+
+# Initialisation du modèle Groq pour Pydantic AI
+groq_model = GroqModel(
+    model_name=model,
+    provider=GroqProvider(api_key=api_key)
+)
 
 # Prompt pour l'agent Pydantic AI
 rag_agent = Agent(
-    qwen_model,
+    groq_model,
     output_type=RAGResponse,
-    model_settings=ModelSettings(extra_body={"enable_thinking": False}),
+    model_settings=GroqModelSettings(groq_reasoning_format="hidden", groq_reasoning_effort="low"),
     system_prompt=(
         "Tu es 'NBA Analyst AI', un assistant expert sur la ligue de basketball NBA. "
         "Tu réponds aux questions des fans en te basant uniquement sur le contexte "
@@ -74,32 +82,8 @@ rag_agent = Agent(
     ),
 )
 
-# Modèle LangChain : sélection et appel des outils
-qwen_langchain = ChatOpenAI(
-    model=model,
-    base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-    api_key=api_key,
-    temperature=0,
-    extra_body={"enable_thinking": False},
-)
-
 # --- Configuration SQL ---
-ask_database = create_sql_tool(qwen_langchain)
-
-# try:
-#     #client = MistralClient(api_key=api_key)
-#     client = ChatOpenAI(
-#         model=model,
-#         api_key=api_key,
-#         base_url="https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-#         temperature=0.2,
-#         extra_body={"enable_thinking": False}
-#     )
-#     logging.info("Client Qwen3.8-flash initialisé.")
-# except Exception as e:
-#     st.error(f"Erreur lors de l'initialisation du client Qwen : {e}")
-#     logging.exception("Erreur initialisation client Qwen")
-#     st.stop()
+ask_database = create_sql_tool(groq_llm)
 
 # --- Chargement du Vector Store (mis en cache) ---
 @st.cache_resource # Garde le manager chargé en mémoire pour la session
@@ -205,375 +189,645 @@ nba_tools = build_nba_tools(
 nba_tools_by_name = {tool.name: tool for tool in nba_tools}
 
 # Le modèle appelle les outils.
-qwen_with_tools = qwen_langchain.bind_tools(
-    nba_tools,
-    parallel_tool_calls=False,
-)
+groq_with_tools = groq_llm.bind_tools(nba_tools)
 
+
+class ResearchQuery(BaseModel):
+    tool: Literal["nba_sql_tool", "faiss_search_tool"]
+
+    objective: str = Field(
+        description="Information précise que cette requête doit obtenir."
+    )
+
+    question: str = Field(
+        description="Question en langage naturel à transmettre à l'outil."
+    )
+
+
+class ResearchPlan(BaseModel):
+    queries: list[ResearchQuery] = Field(
+        description="Liste complète des recherches nécessaires."
+    )
 
 # --- Routage et synthèse avec LangChain ---
 
 ROUTER_SYSTEM_PROMPT = """
-You are a routing agent for an NBA statistics assistant.
+Tu es un planificateur de recherches pour un assistant spécialisé NBA.
 
-You have access to two tools:
+Tu disposes de deux outils :
 
-- nba_sql_tool :
-  Use this tool for structured NBA statistics stored in the database.
-   Examples:
-   - Average points per game of a player
-   - Number of rebounds or assists
-   - Player statistics
-   - Team statistics
-   - Season statistics
-   - Statistical comparisons
+1. nba_sql_tool
+Pour les statistiques structurées :
+- statistiques individuelles et collectives ;
+- points, rebonds, passes ;
+- moyennes, totaux et pourcentages ;
+- comparaisons et classements ;
+- statistiques par saison ou par match.
 
-- faiss_search_tool :
-  Use this tool for unstructured information.
-   Examples:
-   - Player biographies
-   - Match reports
-   - News and articles
-   - Tactical analysis
-   - Explanations and qualitative information
+2. faiss_search_tool
+Pour les informations documentaires :
+- biographies ;
+- comptes rendus de matchs ;
+- actualités ;
+- analyses tactiques ;
+- opinions et réactions des fans.
 
-Routing rules:
+MISSION :
 
-- If the answer can be obtained from a structured
-  database column, ALWAYS use SQL_DATABASE.
-- Do not use FAISS to retrieve numerical statistics
-  already available in SQL.
-- Do not call FAISS as a fallback before trying SQL
-  for structured statistical questions.
-- Use both tools only when the question genuinely
-  requires both structured and unstructured information.
-  
-Appelle l'outil approprié avant de répondre.
-Ne réponds pas à partir de tes seules connaissances si un outil
-peut fournir les informations nécessaires.
-N'invente aucune statistique ni aucun résultat.
+Analyse la question et prépare la liste complète des recherches
+nécessaires pour construire une réponse fiable.
 
-Après réception du résultat de l'outil, rédige une réponse
-claire en français, en te fondant sur ce résultat.
-Si l'outil renvoie une erreur ou ne trouve pas l'information,
-explique-le explicitement.
+RÈGLES DE PLANIFICATION :
+
+1. Identifie toutes les informations distinctes nécessaires.
+
+2. Regroupe les statistiques dans une seule requête SQL
+   lorsqu'elles peuvent être obtenues ensemble.
+
+3. Autorise plusieurs requêtes SQL lorsqu'elles répondent
+   à des objectifs réellement différents.
+
+4. Autorise plusieurs recherches FAISS si elles sont nécessaires.
+
+5. Utilise les deux outils lorsque la question nécessite
+   de croiser des statistiques et des informations documentaires.
+
+6. Ne crée jamais plusieurs requêtes pour reformuler,
+   vérifier ou confirmer une même information.
+
+7. Chaque requête doit correspondre à un objectif distinct.
+
+8. Ne prévois jamais une requête destinée à remplacer
+   ou vérifier le résultat d'une autre requête.
+
+9. N'invente aucune statistique, table, colonne ou champ.
+
+10. Les questions destinées à SQL doivent être formulées
+    en langage naturel, jamais en SQL.
+
+11. Respecte les noms et la signification des statistiques
+    et colonnes de la base.
+
+12. N'utilise pas FAISS pour rechercher des statistiques
+    déjà disponibles dans SQL.
+
+13. Ne prévois pas de recherche lorsque l'information
+    n'est pas nécessaire pour répondre à la question.
+
+IMPORTANT :
+
+Une première requête qui répond directement à une partie
+de la question ne dispense pas de rechercher les autres
+informations distinctes nécessaires.
+
+En revanche, une information déjà couverte par une requête
+ne doit jamais faire l'objet d'une seconde recherche.
+
+Prépare un plan complet avant toute exécution.
 """
 
-# Cette fonction permet un 1er aiguillage vers l'outil SQL si la question est de nature statistique.
-SQL_KEYWORDS = [
-    # Statistiques générales
-    "statistique", "statistiques",
-    "performance", "performances",
-    "résultat", "résultats",
-
-    # Mesures quantitatives
-    "moyenne", "total", "nombre de",
-    "points", "rebonds", "passes",
-    "points par match", "rebonds par match",
-    "passes par match",
-    "pourcentage", "taux de réussite",
-
-    # Comparaisons et classements
-    "comparer", "compare",
-    "comparaison", "supérieur", "inférieur",
-    "classement", "meilleur marqueur",
-]
-
-def is_sql_question(question: str) -> bool:
-    question = question.lower()
-
-    return any(
-        re.search(r"\b" + re.escape(keyword) + r"\b", question)
-        for keyword in SQL_KEYWORDS
-    )
-
-# Cette fonction détermine si la question est mixte (SQL + qualitatif) en vérifiant la présence de mots-clés qualitatifs.
-MIXED_KEYWORDS = [
-    # Communauté
-    "fan", "fans", "supporter", "supporters",
-
-    # Opinions
-    "avis", "opinion", "opinions",
-    "critique", "critiques",
-    "commentaire", "commentaires",
-    "réaction", "réactions",
-    "ressenti",
-
-    # Sentiment
-    "positif", "positive", "positifs", "positives",
-    "négatif", "négative", "négatifs", "négatives",
-    "satisfaction", "mécontentement",
-
-    # Documents et contenus
-    "documents", "articles", "discussions",
-]
-
-def is_mixed_question(question: str) -> bool:
-    question = question.lower()
-
-    has_sql = is_sql_question(question)
-    has_qualitative = any(
-        keyword in question
-        for keyword in MIXED_KEYWORDS
-    )
-
-    return has_sql and has_qualitative
 
 def traiter_question_avec_tools(question: str) -> dict[str, Any]:
-    """Route les questions vers SQL, FAISS ou les deux."""
-
-    print("!!! TRAITER_QUESTION_AVEC_TOOLS EXECUTED !!!")
-    print("SQL QUESTION:", is_sql_question(question))
-    print("MIXED QUESTION:", is_mixed_question(question))
-
-    # --------------------------------------------------
-    # CAS 1 : QUESTION MIXTE SQL + FAISS
-    # --------------------------------------------------
-    if is_mixed_question(question):
-
-        print("\n--- MIXED SQL + FAISS ROUTING ---")
-        print("Question:", question)
-
-        # Appel SQL
-        sql_tool = nba_tools_by_name["nba_sql_tool"]
-
-        sql_result = sql_tool.invoke({
-            "question": question
-        })
-
-        print("SQL RESULT:", sql_result)
-
-        # Appel FAISS avec une recherche ciblée sur les avis des fans
-        faiss_tool = nba_tools_by_name["faiss_search_tool"]
-
-        faiss_result = faiss_tool.invoke({
-            "question": (
-                f"Avis, critiques, commentaires et réactions des fans "
-                f"concernant le sujet de cette question : {question}"
-            )
-        })
-
-        print("FAISS RESULT:", faiss_result)
-
-        # Préparation des contextes pour Ragas
-        # le résultat est converti en dictionnaire
-        try:
-            sql_data = (
-                json.loads(sql_result)
-                if isinstance(sql_result, str)
-                else sql_result
-            )
-
-            sql_rows = sql_data.get("result", [])
-
-            sql_contexts = [
-                "Résultat SQL : " + json.dumps(
-                    row,
-                    ensure_ascii=False
-                )
-                for row in sql_rows
-            ]
-
-        except (json.JSONDecodeError, AttributeError, TypeError):
-            sql_contexts = [f"Résultat SQL : {sql_result}"]
-
-        contexts = sql_contexts + [
-            f"Résultat documentaire FAISS : {faiss_result}"
-        ]
-
-        # Synthèse croisant les deux sources
-        final_message = qwen_langchain.invoke([
-            SystemMessage(
-                content=(
-                    "Tu es un analyste NBA. "
-                    "Tu dois répondre en croisant les statistiques SQL "
-                    "et les informations documentaires FAISS. "
-                    "Distingue les faits statistiques des opinions des fans. "
-                    "Compare les deux sources et formule une conclusion "
-                    "argumentée. "
-                    "N'invente aucune donnée. "
-                    "Si une information manque dans l'une des sources, "
-                    "signale-le explicitement. "
-                    "Réponds en français."
-                )
-            ),
-            HumanMessage(
-                content=(
-                    f"Question : {question}\n\n"
-                    f"Résultats SQL : {sql_result}\n\n"
-                    f"Informations documentaires FAISS : {faiss_result}"
-                )
-            )
-        ])
-
-        return {
-            "answer": final_message.content,
-            "contexts": contexts,
-            "source": "sql_faiss"
-        }
-
-    # --------------------------------------------------
-    # CAS 2 : QUESTION SQL SIMPLE
-    # --------------------------------------------------
-    elif is_sql_question(question):
-
-        print("\n--- DIRECT SQL ROUTING ---")
-        print("Question:", question)
-
-        sql_tool = nba_tools_by_name["nba_sql_tool"]
-
-        result = sql_tool.invoke({
-            "question": question
-        })
-
-        print("SQL RESULT:", result)
-
-        try:
-            sql_data = (
-                json.loads(result)
-                if isinstance(result, str)
-                else result
-            )
-
-            rows = sql_data.get("result", [])
-
-            contexts = [
-                json.dumps(row, ensure_ascii=False)
-                for row in rows
-            ]
-
-        except (json.JSONDecodeError, AttributeError, TypeError):
-            contexts = [str(result)]
-
-        final_message = qwen_langchain.invoke([
-            SystemMessage(
-                content=(
-                    "Réponds à la question uniquement à partir "
-                    "des résultats SQL fournis. "
-                    "N'invente aucune valeur. "
-                    "Réponds en français."
-                )
-            ),
-            HumanMessage(
-                content=f"Question : {question}\nRésultat SQL : {result}"
-            )
-        ])
-
-        return {
-            "answer": final_message.content,
-            "contexts": contexts,
-            "source": "sql"
-        }
-
-    # --------------------------------------------------
-    # CAS 3 : QUESTION DOCUMENTAIRE OU AUTRE
-    # --------------------------------------------------
-    else:
-        messages = [
-            SystemMessage(content=ROUTER_SYSTEM_PROMPT),
-            HumanMessage(content=question),
-        ]
-
-        try:
-            ai_message = qwen_with_tools.invoke(messages)
-            messages.append(ai_message)
-
-            print("\n--- ROUTER DECISION ---")
-            print("Tool calls:", ai_message.tool_calls)
-            print("Content:", ai_message.content)
-
-            if not ai_message.tool_calls:
-                return {
-                    "answer": ai_message.content or "Je n'ai pas pu répondre.",
-                    "contexts": [],
-                    "source": "none"
-                }
-
-            tool_contexts = []
-            sources = []
-
-            for tool_call in ai_message.tool_calls:
-
-                selected_tool = nba_tools_by_name.get(tool_call["name"])
-
-                if selected_tool is None:
-                    tool_result = f"Erreur : outil inconnu {tool_call['name']}."
-                else:
-                    tool_result = selected_tool.invoke(tool_call["args"])
-
-                messages.append(
-                    ToolMessage(
-                        content=str(tool_result),
-                        tool_call_id=tool_call["id"],
-                    )
-                )
-
-                tool_contexts.append(str(tool_result))
-                sources.append(tool_call["name"])
-
-            final_message = qwen_langchain.invoke(messages)
-
-            if "nba_sql_tool" in sources and "faiss_search_tool" in sources:
-                source = "sql_faiss"
-            elif "nba_sql_tool" in sources:
-                source = "sql"
-            elif "faiss_search_tool" in sources:
-                source = "faiss"
-            else:
-                source = "none"
-
-            return {
-                "answer": final_message.content,
-                "contexts": tool_contexts,
-                "source": source
-            }
-
-        except Exception as exc:
-            logging.exception("Erreur dans le routage LangChain")
-
-            return {
-                "answer": f"Erreur technique : {exc}",
-                "contexts": [],
-                "source": "error"
-
-            }
-
-# --- Fonctions ---
-
-def generer_reponse(question: str, context_str: str) -> RAGResponse:
     """
-    Génère une réponse structurée avec Pydantic AI.
+    Architecture :
+    1. Planification des recherches par le LLM.
+    2. Validation et déduplication du plan.
+    3. Exécution des requêtes SQL / FAISS.
+    4. Synthèse finale sans outils.
+    5. Préparation des contextes RAGAS.
     """
-    if not question:
-        logging.warning("Tentative de génération avec une question vide.")
-        return RAGResponse(
-            answer="Je ne peux pas traiter une demande vide."
+
+    print("\n!!! TRAITER_QUESTION_AVEC_TOOLS EXECUTED !!!")
+    print("\n--- LLM PLANNING ---")
+    print("Question :", question)
+
+    MAX_SQL_QUERIES = 3
+    MAX_FAISS_QUERIES = 3
+    MAX_GROQ_RETRIES = 2
+
+    # ---------------------------------
+    # Appel Groq avec gestion du 429
+    # ---------------------------------
+
+    def invoke_groq_with_retry(model, input_messages):
+
+        for attempt in range(MAX_GROQ_RETRIES + 1):
+
+            try:
+                return model.invoke(input_messages)
+
+            except Exception as exc:
+
+                error_message = str(exc).lower()
+
+                is_rate_limit = (
+                    "429" in error_message
+                    or "rate limit" in error_message
+                    or "rate_limit_exceeded" in error_message
+                )
+
+                if not is_rate_limit or attempt == MAX_GROQ_RETRIES:
+                    raise
+
+                match = re.search(
+                    r"try again in ([\d.]+)s",
+                    str(exc),
+                    re.IGNORECASE,
+                )
+
+                wait_seconds = (
+                    float(match.group(1)) + 1
+                    if match
+                    else 7
+                )
+
+                logging.warning(
+                    "Limite Groq atteinte. "
+                    "Nouvel essai dans %.1f secondes.",
+                    wait_seconds,
+                )
+
+                time.sleep(wait_seconds)
+
+    # ---------------------------------
+    # Sérialisation
+    # ---------------------------------
+
+    def serialize_result(result):
+
+        if isinstance(result, str):
+            return result
+
+        return json.dumps(
+            result,
+            ensure_ascii=False,
+            default=str,
         )
+
+    # ---------------------------------
+    # Détection des erreurs
+    # ---------------------------------
+
+    def is_tool_error(result):
+
+        if isinstance(result, dict):
+
+            return (
+                "error" in result
+                or "exception" in result
+            )
+
+        if isinstance(result, str):
+
+            try:
+                parsed = json.loads(result)
+
+                if isinstance(parsed, dict):
+                    return (
+                        "error" in parsed
+                        or "exception" in parsed
+                    )
+
+            except json.JSONDecodeError:
+                pass
+
+            return result.strip().lower().startswith(
+                ("erreur :", "error:", "exception:")
+            )
+
+        return False
+
+    # ---------------------------------
+    # Vérification du SQL brut
+    # ---------------------------------
+
+    def is_raw_sql(value: str):
+
+        return bool(
+            re.match(
+                r"^\s*(?:SQLQuery\s*:\s*)?"
+                r"(SELECT|WITH|INSERT|UPDATE|DELETE|PRAGMA|EXPLAIN)\b",
+                value,
+                re.IGNORECASE,
+            )
+        )
+
+    # ---------------------------------
+    # Normalisation des objectifs
+    # ---------------------------------
+
+    def normalize_text(value):
+
+        value = value.lower().strip()
+
+        value = re.sub(
+            r"\s+",
+            " ",
+            value,
+        )
+
+        return value
+
+    # ---------------------------------
+    # 1. PLANIFICATION
+    # ---------------------------------
 
     try:
-        logging.info(
-            f"Appel à Qwen via Pydantic AI, modèle '{model}'."
+
+        planner = groq_llm.with_structured_output(
+            ResearchPlan,
+            method="function_calling",
         )
 
-        prompt = (
-            "CONTEXTE DE LA BASE DE CONNAISSANCES\n\n"
-            f"{context_str}\n\n"
-            "QUESTION DU FAN\n\n"
-            f"{question}"
+        plan = invoke_groq_with_retry(
+            planner,
+            [
+                SystemMessage(
+                    content=ROUTER_SYSTEM_PROMPT
+                ),
+                HumanMessage(
+                    content=question
+                ),
+            ],
         )
 
-        with logfire.span("RAG  - génération de réponse LLM"):
-            result = rag_agent.run_sync(prompt)
-            logfire.info("Réponse générée par l'agent Pydantic AI",  output_type=type(result.output).__name__,)
+        if not isinstance(plan, ResearchPlan):
+            plan = ResearchPlan.model_validate(plan)
 
-            return result.output
+        print("\n--- RESEARCH PLAN ---")
+
+        for index, query in enumerate(plan.queries, start=1):
+
+            print(f"\nRecherche {index}")
+            print("Outil :", query.tool)
+            print("Objectif :", query.objective)
+            print("Question :", query.question)
+
+    except Exception as exc:
+
+        logging.exception(
+            "Erreur lors de la planification"
+        )
+
+        return {
+            "answer": f"Erreur de planification : {exc}",
+            "contexts": [],
+            "source": "error",
+        }
+
+    # ---------------------------------
+    # 2. VALIDATION DU PLAN
+    # ---------------------------------
+
+    sql_count = sum(
+        1 for q in plan.queries
+        if q.tool == "nba_sql_tool"
+    )
+
+    faiss_count = sum(
+        1 for q in plan.queries
+        if q.tool == "faiss_search_tool"
+    )
+
+    if (
+        sql_count > MAX_SQL_QUERIES
+        or faiss_count > MAX_FAISS_QUERIES
+    ):
+
+        return {
+            "answer": (
+                "Le plan de recherche dépasse le nombre maximal "
+                "de requêtes autorisées. Aucune requête n'a été exécutée."
+            ),
+            "contexts": [],
+            "source": "error",
+        }
+
+    if not plan.queries:
+
+        return {
+            "answer": (
+                "Le planificateur n'a identifié aucune recherche "
+                "nécessaire. Impossible de produire une réponse fiable."
+            ),
+            "contexts": [],
+            "source": "error",
+        }
+
+    # ---------------------------------
+    # 3. DÉDUPLICATION DES REQUÊTES
+    # ---------------------------------
+
+    unique_queries = []
+
+    seen_objectives = set()
+    seen_questions = set()
+
+    for query in plan.queries:
+
+        tool_name = query.tool
+
+        objective_key = (
+            tool_name,
+            normalize_text(query.objective),
+        )
+
+        question_key = (
+            tool_name,
+            normalize_text(query.question),
+        )
+
+        if (
+            objective_key in seen_objectives
+            or question_key in seen_questions
+        ):
+
+            print(
+                "\nRecherche redondante supprimée :",
+                query.question,
+            )
+
+            continue
+
+        if not query.question.strip():
+
+            print("Question vide ignorée.")
+            continue
+
+        if tool_name == "nba_sql_tool" and is_raw_sql(
+            query.question
+        ):
+
+            print(
+                "SQL brut refusé dans le plan :",
+                query.question,
+            )
+
+            continue
+
+        seen_objectives.add(objective_key)
+        seen_questions.add(question_key)
+
+        unique_queries.append(query)
+
+    if not unique_queries:
+
+        return {
+            "answer": (
+                "Aucune requête valide n'a été identifiée."
+            ),
+            "contexts": [],
+            "source": "error",
+        }
+
+    print("\n--- VALIDATED PLAN ---")
+    print("Nombre de recherches :", len(unique_queries))
+
+    # ---------------------------------
+    # 4. EXÉCUTION DES REQUÊTES
+    # ---------------------------------
+
+    tool_contexts = []
+    sources = []
+
+    for index, query in enumerate(unique_queries, start=1):
+
+        tool_name = query.tool
+
+        print(
+            f"\n--- EXECUTION {index}/{len(unique_queries)} ---"
+        )
+
+        print("Outil :", tool_name)
+        print("Objectif :", query.objective)
+        print("Question :", query.question)
+
+        selected_tool = nba_tools_by_name.get(tool_name)
+
+        if selected_tool is None:
+
+            logging.error(
+                "Outil inconnu : %s",
+                tool_name,
+            )
+
+            continue
+
+        try:
+
+            # Les outils reçoivent toujours
+            # une question en langage naturel.
+
+            tool_result = selected_tool.invoke(
+                {
+                    "question": query.question
+                }
+            )
+
+        except Exception as tool_error:
+
+            logging.exception(
+                "Erreur lors de l'exécution de %s",
+                tool_name,
+            )
+
+            tool_result = {
+                "error": str(tool_error)
+            }
+
+        print("Tool result :", tool_result)
+
+        if is_tool_error(tool_result):
+
+            print("Résultat en erreur : non conservé.")
+
+            continue
+
+        # Conservation du résultat.
+        # Aucun autre appel ne peut le remplacer.
+
+        tool_contexts.append(
+            {
+                "outil": tool_name,
+                "objectif": query.objective,
+                "question": query.question,
+                "resultat": tool_result,
+            }
+        )
+
+        if tool_name not in sources:
+            sources.append(tool_name)
+
+    # ---------------------------------
+    # 5. VÉRIFICATION DES RÉSULTATS
+    # ---------------------------------
+
+    if not tool_contexts:
+
+        return {
+            "answer": (
+                "Aucun outil n'a retourné de résultat exploitable. "
+                "Aucune information ne sera inventée."
+            ),
+            "contexts": [],
+            "source": "error",
+        }
+
+    print("\n--- ALL TOOL RESULTS ---")
+
+    for context in tool_contexts:
+        print(
+            "\nOutil :", context["outil"],
+            "\nObjectif :", context["objectif"],
+            "\nRésultat :", context["resultat"],
+        )
+
+    # ---------------------------------
+    # 6. SYNTHÈSE FINALE SANS OUTILS
+    # ---------------------------------
+
+    FINAL_SYSTEM_PROMPT = """
+Tu es un assistant spécialisé dans la NBA.
+
+Tu dois répondre à la question en français.
+
+Tu disposes des résultats des recherches SQL et/ou FAISS.
+
+RÈGLES ABSOLUES :
+
+1. Utilise exclusivement les résultats fournis.
+
+2. Les résultats SQL sont la source de vérité
+   pour les statistiques.
+
+3. Reprends exactement les valeurs numériques retournées
+   par SQL.
+
+4. N'invente aucune statistique.
+
+5. Ne remplace jamais un résultat SQL par une autre valeur.
+
+6. Ne cherche jamais à vérifier ou corriger un résultat SQL.
+
+7. Ne recalcule pas une statistique déjà fournie.
+
+8. Ne transforme pas une statistique en une autre.
+
+9. Pour les informations documentaires, utilise uniquement
+   les éléments présents dans les résultats FAISS.
+
+10. Pour les questions comparatives, confronte les informations
+    SQL et FAISS sans inventer de lien de causalité.
+
+11. Si les résultats sont insuffisants, indique-le clairement.
+
+12. Tu ne disposes d'aucun outil et ne dois effectuer
+    aucune nouvelle recherche.
+
+Formule une réponse claire, structurée et concise.
+"""
+
+    final_messages = [
+
+        SystemMessage(
+            content=FINAL_SYSTEM_PROMPT
+        ),
+
+        HumanMessage(
+            content=(
+                f"QUESTION :\n{question}\n\n"
+                f"RÉSULTATS DES RECHERCHES :\n"
+                f"{json.dumps(tool_contexts, ensure_ascii=False, default=str)}"
+            )
+        ),
+    ]
+
+    try:
+
+        final_message = invoke_groq_with_retry(
+            groq_llm,
+            final_messages,
+        )
+
+    except Exception as exc:
+
+        logging.exception(
+            "Erreur lors de la synthèse finale"
+        )
+
+        return {
+            "answer": f"Erreur de synthèse : {exc}",
+            "contexts": [],
+            "source": "error",
+        }
+
+    # ---------------------------------
+    # 7. IDENTIFICATION DE LA SOURCE
+    # ---------------------------------
+
+    if (
+        "nba_sql_tool" in sources
+        and "faiss_search_tool" in sources
+    ):
+
+        source = "sql_faiss"
+
+    elif "nba_sql_tool" in sources:
+
+        source = "sql"
+
+    elif "faiss_search_tool" in sources:
+
+        source = "faiss"
+
+    else:
+
+        source = "none"
+
+    # ---------------------------------
+    # 8. PRÉPARATION DES CONTEXTES RAGAS
+    # ---------------------------------
+
+    contexts = []
+
+    for item in tool_contexts:
+
+        tool_name = item["outil"]
+        objective = item["objectif"]
+        tool_question = item["question"]
+        result = item["resultat"]
+
+        context = (
+            f"Objectif : {objective}\n"
+            f"Question : {tool_question}\n"
+            f"Résultat : {serialize_result(result)}"
+        )
+
+        if context not in contexts:
+            contexts.append(context)
+
+    # ---------------------------------
+    # 9. RETOUR FINAL
+    # ---------------------------------
+
+    print("\n--- DONNÉES POUR RAGAS ---")
+
+    print("Question :", question)
+    print("Source :", source)
+    print("Answer :", final_message.content)
+    print("Nombre de contextes :", len(contexts))
+
+    for index, context in enumerate(contexts, start=1):
+
+        print(f"\nContexte {index} :")
+        print(context)
+
+    return {
+        "answer": str(final_message.content),
+        "contexts": contexts,
+        "source": source,
+    }
     
-    except Exception as e:
-        st.error(f"Erreur lors de l'appel à l'API Qwen: {e}")
-        logging.exception("Erreur API Qwen pendant client.chat")
-        return RAGResponse(
-            answer="Je suis désolé, une erreur technique m'empêche de répondre. Veuillez réessayer plus tard.")
-
 # --- Interface Utilisateur Streamlit ---
 st.title(APP_TITLE)
 st.caption(f"Assistant virtuel pour {NAME} | Modèle: {model}")
@@ -608,7 +862,7 @@ if prompt:
 
     # Ajouter la réponse à l'historique Streamlit
     st.session_state.messages.append(
-        {"role": "assistant", "content": answer}
+        {"role": "assistant", "content": answer.get("answer", "Aucune réponse fournie.")}
     )
 
 

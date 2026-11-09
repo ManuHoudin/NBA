@@ -15,6 +15,7 @@ from mistralai.client import Mistral
 import asyncio
 from typing import Any
 import sys
+import logging
 from pathlib import Path
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -168,43 +169,53 @@ class RAGasEvaluator:
         reference: str
     ) -> dict:
 
-        print(">>> EVALUATE_CASE START")
+        print("\n>>> EVALUATE_CASE START", flush=True)
 
         # ---------------------------------
-        # Retrieval
+        # Génération de la réponse avec outils
         # ---------------------------------
 
-        # search_results = self.vector_store.search(
-        #     question,
-        #     k=self.search_k,
-        # )
+        result = await self.answer_with_tools(question)
+        if result.get("source") == "error":
 
-        # contexts = [
-        #     result["text"]
-        #     for result in search_results
-        # ]
+            logging.error(
+                "Evaluation RAGAS annulée : erreur de routage."
+            )
 
-        # ---------------------------------
-        # Génération de la réponse
-        # ---------------------------------
+            return {
+                "question": question,
+                "answer": result["answer"],
+                "faithfulness": None,
+                "response_relevancy": None,
+                "context_precision": None,
+                "context_recall": None,
+            }
 
-        result = await self.answer_with_tools(
-            question,
-            # contexts,
-        )
-
-        print("Answer :", result["answer"])
         answer = result["answer"]
+        actual_contexts = result.get("contexts", [])
+
+        # Sécurisation des contextes
+        if actual_contexts is None:
+            actual_contexts = []
+
+        actual_contexts = [
+            str(context)
+            for context in actual_contexts
+            if context is not None
+        ]
+
+        print("\n--- DONNÉES POUR RAGAS ---", flush=True)
+        print("Question :", question, flush=True)
+        print("Source :", result.get("source"), flush=True)
+        print("Answer :", answer, flush=True)
+        print("Nombre de contextes :", len(actual_contexts), flush=True)
+
+        for i, context in enumerate(actual_contexts):
+            print(f"Contexte {i + 1} :", context, flush=True)
 
         # ---------------------------------
-        # Sample pour les métriques
+        # Sample RAGAS
         # ---------------------------------
-
-        actual_contexts = result["contexts"]
-
-        print("Source :", result["source"])
-        print("Answer :", answer)
-        print("Contexts :", actual_contexts)
 
         sample_rag = SingleTurnSample(
             user_input=question,
@@ -214,61 +225,62 @@ class RAGasEvaluator:
         )
 
         # ---------------------------------
-        # Faithfulness
+        # Fonction d'évaluation sécurisée
         # ---------------------------------
 
-        faithfulness = await self.faithfulness.single_turn_ascore(
-            sample_rag
+        async def evaluate_metric(name, metric):
+
+            print(f"\n>>> Calcul de {name}...", flush=True)
+
+            try:
+                score = await metric.single_turn_ascore(sample_rag)
+
+                print(f"{name} : {score}", flush=True)
+
+                return score
+
+            except Exception:
+
+                logging.exception(
+                    "Erreur pendant le calcul de %s",
+                    name
+                )
+
+                return None
+
+        # ---------------------------------
+        # Calcul des métriques
+        # ---------------------------------
+
+        faithfulness = await evaluate_metric(
+            "Faithfulness",
+            self.faithfulness
         )
 
-        print("Faithfulness :", faithfulness)
-
-        # ---------------------------------
-        # Response relevancy
-        # ---------------------------------
-
-        response_relevancy = (
-            await self.response_relevancy.single_turn_ascore(
-                sample_rag
-            )
+        response_relevancy = await evaluate_metric(
+            "Response Relevancy",
+            self.response_relevancy
         )
 
-        print(
-            "Response Relevancy :", response_relevancy,)
-
-        # ---------------------------------
-        # Context Precision
-        # ---------------------------------
-
-        context_precision = (
-            await self.context_precision.single_turn_ascore(
-                sample_rag,
-            )
+        context_precision = await evaluate_metric(
+            "Context Precision",
+            self.context_precision
         )
 
-        print(
-            "Context Precision :",
-            context_precision,
+        context_recall = await evaluate_metric(
+            "Context Recall",
+            self.context_recall
         )
 
         # ---------------------------------
-        # Context Recall
+        # Résultats
         # ---------------------------------
-
-        context_recall = (
-            await self.context_recall.single_turn_ascore(
-                sample_rag
-            )
-        )
-
-        print(
-            "Context Recall :",
-            context_recall,
-        )
 
         return {
             "question": question,
             "answer": answer,
+            "contexts": actual_contexts,
+            "source": result.get("source"),
             "faithfulness": faithfulness,
             "response_relevancy": response_relevancy,
             "context_precision": context_precision,

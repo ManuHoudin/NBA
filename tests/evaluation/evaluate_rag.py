@@ -10,7 +10,9 @@ from langchain_core.messages import (
     SystemMessage,
     HumanMessage,
 )
-from langchain_openai import ChatOpenAI
+from langchain_groq import ChatGroq
+from openai import AsyncOpenAI
+from ragas.llms import llm_factory
 
 from mistralai.client import Mistral
 
@@ -23,7 +25,7 @@ sys.path.insert(0, str(PROJECT_ROOT))
 sys.path.insert(0, str(EVAL_DIR))
 
 from utils.config import (
-    DASHSCOPE_API_KEY,
+    GROQ_API_KEY,
     MISTRAL_API_KEY,
     SEARCH_K,
 )
@@ -44,21 +46,26 @@ logging.basicConfig(
 
 
 # ============================================================
-# LLM Qwen
+# LLM GPT
 # ============================================================
 
-llm = ChatOpenAI(
-    model="qwen3.8-flash",
-    api_key=DASHSCOPE_API_KEY,
-    base_url=(
-        "https://dashscope-intl.aliyuncs.com/"
-        "compatible-mode/v1"
-    ),
-    temperature=0.2,
-    extra_body={
-        "enable_thinking": False
-    },
+groq_client = AsyncOpenAI(
+    api_key=GROQ_API_KEY,
+    base_url="https://api.groq.com/openai/v1"
 )
+
+ragas_llm = llm_factory(
+    model="openai/gpt-oss-20b",
+    provider="openai",
+    client=groq_client,
+    temperature=0.0,
+)
+
+llm = ChatGroq(
+    model="openai/gpt-oss-20b",
+    temperature=0.2,
+    api_key=GROQ_API_KEY
+    )
 
 
 # ============================================================
@@ -154,7 +161,7 @@ async def evaluate_all():
         evaluator = RAGasEvaluator(
             vector_store=vector_store,
             mistral_client=mistral_client,
-            llm=llm,
+            llm=ragas_llm,
             search_k=SEARCH_K,
             answer_fn=generate_answer,
         )

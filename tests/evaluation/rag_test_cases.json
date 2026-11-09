@@ -1,24 +1,7 @@
 [
     {
-        "question": "Quelle est la moyenne de points par match de Nikola Jokić ?",
-        "reference": "2072"
-    },
-    {
-        "question": "Combien de contres a totalisé Victor Wenbanyama ?",
-        "reference": "175"
-    },                                                                            
-    {
-        "question": "Qui marque le plus de points par match en moyenne entre Nikola Jokić et Victor Wenbanyama ?",
+        "question": "Qui marque le plus de points par match en moyenne entre Nikola Jokić et Victor Wembanyama ?",
         "reference": "Nikola Jokić."
-    },
-    {
-        "question": "Parmi les joueurs de SAS, lesquels ont une moyenne d'au moins 20 points par match ?",
-        "reference": "De'Aaron Fox, Stephon Castle, Victor Wembanyama, Devin Vassell, Harrison Barnes, Keldon Johnson, Julian Champagnie, Chris Paul, Jeremy Sochan, Sandro Mamukelashvili, Malaki Branham, Blake Wesley, Charles Bassey, Bismack Biyombo, Jordan McLaughlin."
-    },
-    
-    {
-        "question": "Quelles équipes ont remporté des matchs cette année ?",
-        "reference": "Pas de données suffisantes pour répondre à cette question."
     }
 
 ]
