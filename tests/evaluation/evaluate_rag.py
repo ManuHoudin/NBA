@@ -51,7 +51,7 @@ logging.basicConfig(
 
 groq_client = AsyncOpenAI(
     api_key=GROQ_API_KEY,
-    base_url="https://api.groq.com/openai/v1"
+    base_url="https://api.groq.com/openai/v1",
 )
 
 ragas_llm = llm_factory(
@@ -59,6 +59,7 @@ ragas_llm = llm_factory(
     provider="openai",
     client=groq_client,
     temperature=0.0,
+    max_tokens=4096,
 )
 
 llm = ChatGroq(
@@ -188,6 +189,12 @@ async def evaluate_all():
                 question=question,
                 reference=reference,
             )
+            if result is None:
+                logging.error(
+                    "Résultat absent pour la question : %s",
+                    question,
+                )
+                continue
 
             results.append(result)
 

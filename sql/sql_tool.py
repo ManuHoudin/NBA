@@ -1,3 +1,4 @@
+import logging
 import re
 import sqlite3
 from pathlib import Path
@@ -31,6 +32,9 @@ def clean_sql_query(raw_query: str) -> str:
         query,
         flags=re.IGNORECASE,
     ).strip()
+
+    # Corrige LIMIT collé à sa valeur : LIMIT10 -> LIMIT 10
+    query = re.sub(r"\bLIMIT\s*(\d+)\b", r"LIMIT \1", query, flags=re.IGNORECASE)
 
     # Extraire la requête si un préambule précède le SQL
     match = re.search(
@@ -104,6 +108,20 @@ def create_sql_tool(llm, db_path=DB_PATH):
                 "question": question
             })
 
+            if not raw_query or not raw_query.strip():
+                logging.warning(
+                    "Réponse SQL vide du LLM. Nouvelle tentative pour : %s",
+                    question
+                )
+                raw_query = query_chain.invoke({"question": question})
+
+            if not raw_query or not raw_query.strip():
+                raise ValueError("Le LLM a renvoyé une réponse SQL vide après deux tentatives.")
+
+            print("\n--- RAW SQL RESPONSE ---")
+            print("Type :", type(raw_query))
+            print("Contenu :", repr(raw_query))
+            
             # Nettoyer la réponse.
             query = clean_sql_query(raw_query)
 
