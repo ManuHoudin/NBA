@@ -6,6 +6,8 @@ from ragas.embeddings import BaseRagasEmbeddings
 from ragas.metrics import (
     Faithfulness,
     ResponseRelevancy,
+    ContextPrecision,
+    ContextRecall,
 )
 
 from mistralai.client import Mistral
@@ -149,6 +151,8 @@ class RAGasEvaluator:
             llm=llm,
             embeddings=self.ragas_embeddings,
         )
+        self.context_precision = ContextPrecision(llm=self.llm)
+        self.context_recall = ContextRecall(llm=self.llm)
 
     async def evaluate_case(
         self,
@@ -190,6 +194,7 @@ class RAGasEvaluator:
         sample_rag = SingleTurnSample(
             user_input=question,
             response=answer,
+            reference=reference,
             retrieved_contexts=contexts,
         )
 
@@ -213,6 +218,14 @@ class RAGasEvaluator:
             )
         )
 
+        context_precision = await self.context_precision.single_turn_ascore(
+            sample_rag
+        )
+
+        context_recall = await self.context_recall.single_turn_ascore(
+            sample_rag
+        )
+
         print(
             "Response Relevancy :",
             response_relevancy,
@@ -223,4 +236,6 @@ class RAGasEvaluator:
             "answer": answer,
             "faithfulness": faithfulness,
             "response_relevancy": response_relevancy,
+            "context_precision": context_precision,
+            "context_recall": context_recall,
         }

@@ -1,6 +1,8 @@
 import asyncio
 import json
 import logging
+from pathlib import Path
+import sys
 
 from dotenv import load_dotenv
 
@@ -12,7 +14,25 @@ from langchain_openai import ChatOpenAI
 
 from mistralai.client import Mistral
 
-from tests.evaluation.RAGasEvaluator import RAGasEvaluator
+from RAGasEvaluator import RAGasEvaluator
+
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
+EVAL_DIR = PROJECT_ROOT / "tests" / "evaluation"
+
+# Priorité au répertoire du projet
+sys.path.insert(0, str(PROJECT_ROOT))
+
+# Suppression du module utils déjà chargé
+if "utils" in sys.modules:
+    del sys.modules["utils"]
+
+sys.path.insert(0, str(PROJECT_ROOT))
+sys.path.insert(0, str(EVAL_DIR))
+
+
+import importlib.util
+
+spec = importlib.util.find_spec("utils")
 
 from utils.config import (
     DASHSCOPE_API_KEY,
@@ -162,6 +182,7 @@ async def evaluate_all():
         for i, item in enumerate(test_data):
 
             question = item["question"]
+            reference = item["reference"]
 
             logging.info(
                 "[%d/%d] %s",
@@ -172,7 +193,7 @@ async def evaluate_all():
 
             result = await evaluator.evaluate_case(
                 question=question,
-                reference=item["reference"],
+                reference=reference,
             )
 
             results.append(result)
@@ -190,6 +211,16 @@ async def evaluate_all():
             print(
                 "Response Relevancy :",
                 result["response_relevancy"],
+            )
+            
+            print(
+                "Context Precision :",
+                result["context_precision"],
+            )
+
+            print(
+                "Context Recall :",
+                result["context_recall"],
             )
 
         return results
