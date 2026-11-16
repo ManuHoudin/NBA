@@ -15,7 +15,7 @@ Les tests unitaires se trouvent dans sql/tests. Ils testent:
 
 ## Tests Ragas
 - lancer le test avec le script tests/evaluation/evaluate_rag.py
-- le fichier json des cas de tests est dans tests/evaluation/rag_test_cases.json. Il contient des cas adressant uniquement le traitement des pdf par le llm, d'autres le traitement des données via des requêtes SQL et enfin des cas mixtes.
+- le fichier json des cas de tests est dans tests/evaluation/rag_test_cases.json. Il contient des cas adressants uniquement le traitement des pdf par le llm, d'autres le traitement des données via des requêtes SQL et enfin des cas mixtes.
 
 Les métriques suivantes sont calculées :
 - Context Precision : est-ce que le tool (Faiss ou SQL) place les passages utiles en tête des résultats, sans trop de passages hors-sujet ?
@@ -27,6 +27,7 @@ Amélioration des résultats:
 - nettoyage des requêtes transmises
 - interdiction des requêtes qui modifient la base (insert, update, delete, drop, alter, create)
 - nettoyage des résultats récupérés
+- utiliser un planificateur de requêtes qui va d'abord recenser les requêtes potentiellement exécutables, retirer les doublons puis exécuter les requêtes pertinentes par rapport àla question.
 - bien récupérer toutes les réponses retournées notamment lors de comparaisons
 - on ne transmet pas le contexte tel que, il faut en extraire les éléments pour augmenter Faithfulness
 - utiliser une liste de mots clés enrichies pour le filtrage entre Mixed_tool et SQL_tool (scenario 2)

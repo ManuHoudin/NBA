@@ -283,7 +283,7 @@ STAT_COLUMNS = [
 ]
 
 def load_teams(conn):
-    # Lecture de l'onglet Equipe
+    # Insertion des équipes depuis la feuille Excel "Equipe"
     df_teams = pd.read_excel(
         EXCEL_FILE,
         sheet_name=TEAM_SHEET_NAME,
@@ -319,6 +319,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
             f"Fichier SQL introuvable : {SQL_FILE.resolve()}"
         )
 
+    # Exécution du script SQL pour créer les tables
     with SQL_FILE.open("r", encoding="utf-8") as sql_file:
         sql_script = sql_file.read()
 
@@ -331,6 +332,7 @@ def create_tables(conn: sqlite3.Connection) -> None:
 
 
 def insert_players(
+    # Insertion des joueurs
     conn: sqlite3.Connection,
     players: list[NBAPlayerRow],
 ) -> None:

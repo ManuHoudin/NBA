@@ -22,7 +22,7 @@ from sql.sql_tool import create_sql_tool
 # --- Importations depuis vos modules ---
 try:
     from utils.config import (
-        MISTRAL_API_KEY, MODEL_NAME, SEARCH_K,
+        MODEL_NAME, SEARCH_K,
         APP_TITLE, NAME, GROQ_API_KEY
     )
     from utils.vector_store import VectorStoreManager
@@ -43,10 +43,9 @@ logfire.instrument_pydantic(record="failure")
 from utils.format_control import UserQuery, RAGResponse, SearchResult
 
 # --- Configuration du Logging ---
-# Note: Streamlit peut avoir sa propre gestion de logs. Configurer ici est une bonne pratique.
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(levelname)s - %(module)s - %(message)s')
 
-# --- Configuration de l'API Mistral / GPT ---
+# --- Configuration de l'API GPT ---
 api_key = GROQ_API_KEY
 model = MODEL_NAME
 
@@ -126,7 +125,7 @@ def build_nba_tools(ask_database, vector_store_manager):
     def nba_sql_tool(question: str) -> str:
         """Interroge les tables SQL NBA pour les questions chiffrées :
         statistiques de joueurs, classements, moyennes, totaux,
-        comparaisons statistiques et statistiques par équipe."""
+        comparaisons statistiques par joueurs et statistiques par équipe."""
         response = ask_database(question)
 
         if response["error"]:
@@ -193,6 +192,7 @@ groq_with_tools = groq_llm.bind_tools(nba_tools)
 
 
 class ResearchQuery(BaseModel):
+    """Permet de structurer les requêtes de recherche planifiées par le LLM pour l'agent Pydantic AI (SQL / Faiss)."""
     tool: Literal["nba_sql_tool", "faiss_search_tool"]
 
     objective: str = Field(
@@ -205,6 +205,8 @@ class ResearchQuery(BaseModel):
 
 
 class ResearchPlan(BaseModel):
+    """Permet de structurer le plan de recherche complet généré par le LLM pour l'agent Pydantic AI.
+    Il contient la liste des requêtes qu'il est possible d'utiliser pour répondre à la question posée par l'utilisateur."""
     queries: list[ResearchQuery] = Field(
         description="Liste complète des recherches nécessaires."
     )
@@ -305,9 +307,9 @@ def traiter_question_avec_tools(question: str) -> dict[str, Any]:
     MAX_FAISS_QUERIES = 3
     MAX_GROQ_RETRIES = 2
 
-    # ---------------------------------
-    # Appel Groq avec gestion du 429
-    # ---------------------------------
+    # -------------------------------------------------------
+    # Appel Groq avec gestion du 429 Bad Request (rate limit)
+    # -------------------------------------------------------
 
     def invoke_groq_with_retry(model, input_messages):
 
@@ -349,9 +351,9 @@ def traiter_question_avec_tools(question: str) -> dict[str, Any]:
 
                 time.sleep(wait_seconds)
 
-    # ---------------------------------
-    # Sérialisation
-    # ---------------------------------
+    # -----------------------------------------------------------------------
+    # Sérialisation pour uniformiser les résultats retournés par les 2 outils
+    # -----------------------------------------------------------------------
 
     def serialize_result(result):
 
@@ -615,9 +617,6 @@ def traiter_question_avec_tools(question: str) -> dict[str, Any]:
 
         try:
 
-            # Les outils reçoivent toujours
-            # une question en langage naturel.
-
             tool_result = selected_tool.invoke(
                 {
                     "question": query.question
@@ -644,8 +643,6 @@ def traiter_question_avec_tools(question: str) -> dict[str, Any]:
             continue
 
         # Conservation du résultat.
-        # Aucun autre appel ne peut le remplacer.
-
         tool_contexts.append(
             {
                 "outil": tool_name,
@@ -762,7 +759,7 @@ Formule une réponse claire, structurée et concise.
         }
 
     # ---------------------------------
-    # 7. IDENTIFICATION DE LA SOURCE
+    # 7. IDENTIFICATION DU TOOL UTILISE
     # ---------------------------------
 
     if (

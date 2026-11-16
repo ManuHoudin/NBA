@@ -47,3 +47,6 @@ inputs/
 
 # Jupyter Notebook
 .ipynb_checkpoints
+
+# Documents
+.zip
